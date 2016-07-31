@@ -3640,82 +3640,178 @@ static void gen_sc(DisasContext *ctx)
 
 /***                                Trap                                   ***/
 
-/* Check for unconditional traps (always or never) */
-static bool check_unconditional_trap(DisasContext *ctx)
+static int TO2tcg[32] = {
+        TCG_COND_NEVER, /* no condition */
+        TCG_COND_GTU,   /* 0x01 u> */
+        TCG_COND_LTU,   /* 0x02 u< */
+        TCG_COND_NE,    /* 0x03 u< or u> -> NE */
+        TCG_COND_EQ,    /* 0x04 = */
+        TCG_COND_GEU,   /* 0x05 u> or = */
+        TCG_COND_LEU,   /* 0x06 u< or = */
+        TCG_COND_ALWAYS,/* 0x07 u< or u> or = -> ALWAYS */
+        TCG_COND_GT,    /* 0x08 > */
+        -1,             /* 0x09 > or u> -> weird */
+        -1,             /* 0x0a > or u< -> weird */
+        -1,             /* 0x0b > or u< or u> -> weird */
+        TCG_COND_GE,    /* 0x0c > or = */
+        -1,             /* 0x0d > or = or u> */
+        -1,             /* 0x0e > or = or u< */
+        -1,             /* 0x0f > or = or u> or u< */
+        TCG_COND_LT,    /* 0x10 < */
+        -1,             /* 0x11 < or u> -> weird */
+        -1,             /* 0x12 < or u< -> weird */
+        -1,             /* 0x13 < or u< or u> -> weird */
+        TCG_COND_LE,    /* 0x14 < or = */
+        -1,             /* 0x15 < or = or u> -> weird */
+        -1,             /* 0x16 < or = or u< -> weird */
+        TCG_COND_ALWAYS,/* 0x17 < or = or u< or u> -> ALWAYS */
+        TCG_COND_NE,    /* 0x18 < or > -> NE */
+        -1,             /* 0x19 < or > or u> -> weird */
+        -1,             /* 0x1a < or > or u< -> weird */
+        -1,             /* 0x1b < or > or u> or u< -> weird */
+        TCG_COND_ALWAYS,/* 0x1c < or > or = -> ALWAYS */
+        TCG_COND_ALWAYS,/* 0x1d < or > or = or u> -> ALWAYS */
+        TCG_COND_ALWAYS,/* 0x1e < or > or = or u< -> ALWAYS */
+        TCG_COND_ALWAYS,/* 0x1f < or > or = or u< -> ALWAYS */
+};
+
+#define TRAP_UNCOND     (-1)
+#define TRAP_HELPER     (-2)
+
+static int precheck_trap(DisasContext *ctx)
 {
-    /* Trap never */
-    if (TO(ctx->opcode) == 0) {
-        return true;
+    int cond = TO2tcg[TO(ctx->opcode)];
+
+    /* Weird traps go to helper */
+    if (cond < 0) {
+        return TRAP_HELPER;
     }
-    /* Trap always */
-    if (TO(ctx->opcode) == 31) {
+    /* Unconditionals */
+    if (cond == TCG_COND_ALWAYS) {
         gen_exception_err(ctx, POWERPC_EXCP_PROGRAM, POWERPC_EXCP_TRAP);
-        return true;
+        return TRAP_UNCOND;
     }
-    return false;
+    if (cond == TCG_COND_NEVER) {
+        return TRAP_UNCOND;
+    }
+    /* Invert the condition as we branch over the exception when the
+     * condition is *not* met
+     */
+    return tcg_invert_cond(cond);
+}
+
+static void gen_trap(DisasContext *ctx)
+{
+    TCGv_i32 t0, t1;
+
+    t0 = tcg_const_i32(POWERPC_EXCP_PROGRAM);
+    t1 = tcg_const_i32(POWERPC_EXCP_TRAP);
+    gen_update_nip(ctx, ctx->nip - 4);
+    gen_helper_raise_exception_err(cpu_env, t0, t1);
+    tcg_temp_free_i32(t0);
+    tcg_temp_free_i32(t1);
 }
 
 /* tw */
 static void gen_tw(DisasContext *ctx)
 {
-    TCGv_i32 t0;
+    int cond = precheck_trap(ctx);
+    TCGLabel *l1;
+    TCGv t0;
+    TCGv t1;
 
-    if (check_unconditional_trap(ctx)) {
+    if (cond == TRAP_UNCOND) {
+        return;
+    } else if (cond == TRAP_HELPER) {
+        TCGv_i32 trapop = tcg_const_i32(TO(ctx->opcode));
+        gen_helper_tw(cpu_env, cpu_gpr[rA(ctx->opcode)],
+                      cpu_gpr[rB(ctx->opcode)], trapop);
+        tcg_temp_free_i32(trapop);
         return;
     }
-    t0 = tcg_const_i32(TO(ctx->opcode));
-    gen_helper_tw(cpu_env, cpu_gpr[rA(ctx->opcode)], cpu_gpr[rB(ctx->opcode)],
-                  t0);
-    tcg_temp_free_i32(t0);
+    l1 = gen_new_label();
+    t0 = tcg_temp_new();
+    t1 = tcg_temp_new();
+    tcg_gen_ext32s_tl(t0, cpu_gpr[rA(ctx->opcode)]);
+    tcg_gen_ext32s_tl(t1, cpu_gpr[rB(ctx->opcode)]);
+    tcg_gen_brcond_tl(cond, t0, t1, l1);
+    gen_trap(ctx);
+    gen_set_label(l1);
+    tcg_temp_free(t0);
+    tcg_temp_free(t1);
 }
 
 /* twi */
 static void gen_twi(DisasContext *ctx)
 {
+    int cond = precheck_trap(ctx);
+    TCGLabel *l1;
     TCGv t0;
-    TCGv_i32 t1;
 
-    if (check_unconditional_trap(ctx)) {
+    if (cond == TRAP_UNCOND) {
+        return;
+    } else if (cond == TRAP_HELPER) {
+        TCGv_i32 trapop = tcg_const_i32(TO(ctx->opcode));
+        t0 = tcg_const_tl(SIMM(ctx->opcode));
+        gen_helper_tw(cpu_env, cpu_gpr[rA(ctx->opcode)], t0, trapop);
+        tcg_temp_free_i32(trapop);
+        tcg_temp_free(t0);
         return;
     }
-    t0 = tcg_const_tl(SIMM(ctx->opcode));
-    t1 = tcg_const_i32(TO(ctx->opcode));
-    gen_helper_tw(cpu_env, cpu_gpr[rA(ctx->opcode)], t0, t1);
+    l1 = gen_new_label();
+    t0 = tcg_temp_new();
+    tcg_gen_ext32s_tl(t0, cpu_gpr[rA(ctx->opcode)]);
+    tcg_gen_brcondi_tl(cond, t0, SIMM(ctx->opcode), l1);
+    gen_trap(ctx);
+    gen_set_label(l1);
     tcg_temp_free(t0);
-    tcg_temp_free_i32(t1);
 }
 
 #if defined(TARGET_PPC64)
 /* td */
 static void gen_td(DisasContext *ctx)
 {
-    TCGv_i32 t0;
+    int cond = precheck_trap(ctx);
+    TCGLabel *l1;
 
-    if (check_unconditional_trap(ctx)) {
+    if (cond == TRAP_UNCOND) {
+        return;
+    } else if (cond == TRAP_HELPER) {
+        TCGv_i32 trapop = tcg_const_i32(TO(ctx->opcode));
+        gen_helper_td(cpu_env, cpu_gpr[rA(ctx->opcode)],
+                      cpu_gpr[rB(ctx->opcode)], trapop);
+        tcg_temp_free_i32(trapop);
         return;
     }
-    t0 = tcg_const_i32(TO(ctx->opcode));
-    gen_helper_td(cpu_env, cpu_gpr[rA(ctx->opcode)], cpu_gpr[rB(ctx->opcode)],
-                  t0);
-    tcg_temp_free_i32(t0);
+    l1 = gen_new_label();
+    tcg_gen_brcond_tl(cond, cpu_gpr[rA(ctx->opcode)],
+                      cpu_gpr[rB(ctx->opcode)], l1);
+    gen_trap(ctx);
+    gen_set_label(l1);
 }
 
 /* tdi */
 static void gen_tdi(DisasContext *ctx)
 {
-    TCGv t0;
-    TCGv_i32 t1;
+    int cond = precheck_trap(ctx);
+    TCGLabel *l1;
 
-    if (check_unconditional_trap(ctx)) {
+    if (cond == TRAP_UNCOND) {
+        return;
+    } else if (cond == TRAP_HELPER) {
+        TCGv_i32 trapop = tcg_const_i32(TO(ctx->opcode));
+        TCGv t0 = tcg_const_tl(SIMM(ctx->opcode));
+        gen_helper_td(cpu_env, cpu_gpr[rA(ctx->opcode)], t0, trapop);
+        tcg_temp_free_i32(trapop);
+        tcg_temp_free(t0);
         return;
     }
-    t0 = tcg_const_tl(SIMM(ctx->opcode));
-    t1 = tcg_const_i32(TO(ctx->opcode));
-    gen_helper_td(cpu_env, cpu_gpr[rA(ctx->opcode)], t0, t1);
-    tcg_temp_free(t0);
-    tcg_temp_free_i32(t1);
+    l1 = gen_new_label();
+    tcg_gen_brcondi_tl(cond, cpu_gpr[rA(ctx->opcode)], SIMM(ctx->opcode), l1);
+    gen_trap(ctx);
+    gen_set_label(l1);
 }
-#endif
+#endif /* defined(TARGET_PPC64) */
 
 /***                          Processor control                            ***/
 
