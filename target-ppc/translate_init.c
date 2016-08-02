@@ -7447,6 +7447,15 @@ POWERPC_FAMILY(e600)(ObjectClass *oc, void *data)
                  POWERPC_FLAG_BUS_CLK;
 }
 
+#if !defined(CONFIG_USER_ONLY)
+void cpu_ppc_enable_mol_osi(PowerPCCPU *cpu)
+{
+    CPUPPCState *env = &cpu->env;
+
+    env->mol_osi_enabled = true;
+}
+#endif
+
 #if defined (TARGET_PPC64)
 #if defined(CONFIG_USER_ONLY)
 #define POWERPC970_HID5_INIT 0x00000080

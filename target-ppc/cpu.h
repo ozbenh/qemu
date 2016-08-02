@@ -1085,6 +1085,9 @@ struct CPUPPCState {
      * 0x100), so flag this here.
      */
     bool in_pm_state;
+
+    /* Enable MOL OSI calls */
+    bool mol_osi_enabled;
 #endif
 
     /* Those resources are used only during code translation */
@@ -1252,6 +1255,8 @@ void store_booke_tsr (CPUPPCState *env, target_ulong val);
 void ppc_tlb_invalidate_all (CPUPPCState *env);
 void ppc_tlb_invalidate_one (CPUPPCState *env, target_ulong addr);
 void cpu_ppc_set_papr(PowerPCCPU *cpu);
+void cpu_ppc_enable_mol_osi(PowerPCCPU *cpu);
+void ppc_mol_osi_call(PowerPCCPU *cpu);
 #endif
 #endif
 
