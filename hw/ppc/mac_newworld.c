@@ -148,7 +148,7 @@ static void ppc_core99_reset(void *opaque)
 }
 
 /* PowerPC Mac99 hardware initialisation */
-static void ppc_core99_init(MachineState *machine)
+static void ppc_newworld_init(MachineState *machine, bool is_mini)
 {
     ram_addr_t ram_size = machine->ram_size;
     const char *kernel_filename = machine->kernel_filename;
@@ -380,7 +380,7 @@ static void ppc_core99_init(MachineState *machine)
         machine_arch = ARCH_MAC99_U3;
     } else {
         pci_bus = pci_pmac_init(pic, get_system_memory(), get_system_io());
-        machine_arch = ARCH_MAC99;
+        machine_arch = is_mini ? ARCH_MAC99P : ARCH_MAC99;
     }
     object_property_set_bool(OBJECT(pci_bus), true, "realized", &error_abort);
 
@@ -401,12 +401,17 @@ static void ppc_core99_init(MachineState *machine)
 
     macio = pci_create(pci_bus, -1, TYPE_NEWWORLD_MACIO);
     dev = DEVICE(macio);
-    qdev_connect_gpio_out(dev, 0, pic[0x19]); /* CUDA */
+    qdev_connect_gpio_out(dev, 0, pic[0x19]); /* CUDA/PMU */
     qdev_connect_gpio_out(dev, 1, pic[0x0d]); /* IDE */
     qdev_connect_gpio_out(dev, 2, pic[0x02]); /* IDE DMA */
     qdev_connect_gpio_out(dev, 3, pic[0x0e]); /* IDE */
     qdev_connect_gpio_out(dev, 4, pic[0x03]); /* IDE DMA */
+    qdev_connect_gpio_out(dev, 5, pic[0x2f]); /* EXTING_GPIO1 (PMU) */
     qdev_prop_set_uint64(dev, "frequency", tbfreq);
+    if (machine_arch == ARCH_MAC99_U3 ||
+        machine_arch == ARCH_MAC99P) {
+        qdev_prop_set_bit(dev, "has_pmu", true);
+    }
     macio_init(macio, pic_mem, escc_bar);
 
     /* We only emulate 2 out of 3 IDE controllers for now */
@@ -420,19 +425,27 @@ static void ppc_core99_init(MachineState *machine)
                                                         "ide[1]"));
     macio_ide_init_drives(macio_ide, &hd[MAX_IDE_DEVS]);
 
-    dev = DEVICE(object_resolve_path_component(OBJECT(macio), "cuda"));
-    adb_bus = qdev_get_child_bus(dev, "adb.0");
-    dev = qdev_create(adb_bus, TYPE_ADB_KEYBOARD);
-    qdev_init_nofail(dev);
-    dev = qdev_create(adb_bus, TYPE_ADB_MOUSE);
-    qdev_init_nofail(dev);
+    dev = DEVICE(object_resolve_path_component(OBJECT(macio), "pmu"));
+    if (dev == NULL) {
+        dev = DEVICE(object_resolve_path_component(OBJECT(macio), "cuda"));
+    }
+    if (dev != NULL) {
+        adb_bus = qdev_get_child_bus(dev, "adb.0");
+        if (adb_bus != NULL) {
+            dev = qdev_create(adb_bus, TYPE_ADB_KEYBOARD);
+            qdev_init_nofail(dev);
+            dev = qdev_create(adb_bus, TYPE_ADB_MOUSE);
+            qdev_init_nofail(dev);
+        }
+    }
 
     if (machine->usb) {
         pci_create_simple(pci_bus, -1, "pci-ohci");
 
         /* U3 needs to use USB for input because Linux doesn't support via-cuda
         on PPC64 */
-        if (machine_arch == ARCH_MAC99_U3) {
+        if (machine_arch == ARCH_MAC99_U3 ||
+            machine_arch == ARCH_MAC99P) {
             USBBus *usb_bus = usb_bus_find(-1);
 
             usb_create_simple(usb_bus, "usb-kbd");
@@ -507,6 +520,16 @@ static void ppc_core99_init(MachineState *machine)
     qemu_register_boot_set(fw_cfg_boot_set, fw_cfg);
 }
 
+static void ppc_core99_init(MachineState *machine)
+{
+    ppc_newworld_init(machine, false);
+}
+
+static void ppc_macmini_init(MachineState *machine)
+{
+    ppc_newworld_init(machine, true);
+}
+
 static int core99_kvm_type(const char *arg)
 {
     /* Always force PR KVM */
@@ -520,11 +543,19 @@ static int core99_kvm_type(const char *arg)
         .value    = "qemu_vga.ndrv",                    \
     },
 
+#define MAC_WITH_PMU_COMPAT                             \
+    MAC_CORE99_COMPAT                                   \
+    {                                                   \
+        .driver   = "macio",                            \
+        .property = "has_pmu",                          \
+        .value    = "true",                             \
+    },
+
 static void core99_machine_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
-    mc->desc = "Mac99 based PowerMAC";
+    mc->desc = "Core99 PowerMac with CUDA";
     mc->init = ppc_core99_init;
     mc->max_cpus = MAX_CPUS;
     mc->default_boot_order = "cd";
@@ -538,9 +569,28 @@ static const TypeInfo core99_machine_info = {
     .class_init    = core99_machine_class_init,
 };
 
+static void macmini_machine_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "MacRISC2 PowerMac";
+    mc->init = ppc_macmini_init;
+    mc->max_cpus = MAX_CPUS;
+    mc->default_boot_order = "cd";
+    mc->kvm_type = core99_kvm_type;
+    SET_MACHINE_COMPAT(mc, MAC_WITH_PMU_COMPAT);
+}
+
+static const TypeInfo macmini_machine_info = {
+    .name          = MACHINE_TYPE_NAME("mac99p"),
+    .parent        = TYPE_MACHINE,
+    .class_init    = macmini_machine_class_init,
+};
+
 static void mac_machine_register_types(void)
 {
     type_register_static(&core99_machine_info);
+    type_register_static(&macmini_machine_info);
 }
 
 type_init(mac_machine_register_types)

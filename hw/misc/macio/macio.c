@@ -41,10 +41,12 @@ typedef struct MacIOState
 
     MemoryRegion bar;
     CUDAState cuda;
+    DeviceState *pmu;
     void *dbdma;
     MemoryRegion *pic_mem;
     MemoryRegion *escc_mem;
     uint64_t frequency;
+    bool has_pmu;
 } MacIOState;
 
 #define OLDWORLD_MACIO(obj) \
@@ -68,8 +70,11 @@ typedef struct NewWorldMacIOState {
     /*< private >*/
     MacIOState parent_obj;
     /*< public >*/
-    qemu_irq irqs[5];
+    qemu_irq irqs[6];
+    int gpio1_irq;
     MACIOIDEState ide[2];
+    uint8_t gpio_levels[8];
+    uint8_t gpio_regs[36]; /* XXX Check count */
 } NewWorldMacIOState;
 
 /*
@@ -132,12 +137,17 @@ static void macio_common_realize(PCIDevice *d, Error **errp)
     s->dbdma = DBDMA_init(&dbdma_mem);
     memory_region_add_subregion(&s->bar, 0x08000, dbdma_mem);
 
-    object_property_set_bool(OBJECT(&s->cuda), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
+    if (s->has_pmu) {
+        qdev_init_nofail(s->pmu);
+        sysbus_dev = SYS_BUS_DEVICE(s->pmu);
+    } else {
+        object_property_set_bool(OBJECT(&s->cuda), true, "realized", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+        sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
     }
-    sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
     memory_region_add_subregion(&s->bar, 0x16000,
                                 sysbus_mmio_get_region(sysbus_dev, 0));
 
@@ -173,7 +183,11 @@ static void macio_oldworld_realize(PCIDevice *d, Error **errp)
         return;
     }
 
-    sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
+    if (s->has_pmu) {
+        sysbus_dev = SYS_BUS_DEVICE(s->pmu);
+    } else {
+        sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
+    }
     sysbus_connect_irq(sysbus_dev, 0, os->irqs[cur_irq++]);
 
     object_property_set_bool(OBJECT(&os->nvram), true, "realized", &err);
@@ -267,6 +281,90 @@ static const MemoryRegionOps timer_ops = {
     .read = timer_read,
     .write = timer_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
+    .impl = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    },
+};
+
+static void gpio_write(void *opaque, hwaddr addr, uint64_t value,
+                       unsigned size)
+{
+    NewWorldMacIOState *ns = opaque;
+
+    printf("MACIO: Write GPIO %lx/%d = %lx\n",
+           (unsigned long)addr, size, (unsigned long)value);
+
+    /* Levels regs are read-only */
+    if (addr < 8) {
+        return;
+    }
+    addr -= 8;
+    if (addr < 36) {
+        uint8_t ibit;
+
+        value &= ~2;
+        if (value & 4) {
+            ibit = (value & 1) << 1;
+        } else {
+            ibit = ns->gpio_regs[addr] & 2;
+        }
+        ns->gpio_regs[addr] = value | ibit;
+
+        // XXX Update the levels summary
+        if (addr < 32) {
+        } else {
+        }
+    }
+}
+
+void MacIOSetGPIO(DeviceState *dev, uint32_t gpio, bool state)
+{
+    NewWorldMacIOState *ns = NEWWORLD_MACIO(dev);
+
+    if (ns->gpio_regs[gpio] & 4) {
+        printf("MACIO: Setting GPIO %d while it's an output\n", gpio);
+    }
+    ns->gpio_regs[gpio] = ns->gpio_regs[gpio] & 2;
+    if (state) {
+        ns->gpio_regs[gpio] |= 2;
+    }
+    // XXX Update the levels summary
+    // XXX Update the interrupts
+    if (gpio == 9) {
+        if (state) {
+            qemu_irq_raise(ns->irqs[ns->gpio1_irq]);
+        } else {
+            qemu_irq_lower(ns->irqs[ns->gpio1_irq]);
+        }
+    }
+}
+
+static uint64_t gpio_read(void *opaque, hwaddr addr, unsigned size)
+{
+    NewWorldMacIOState *ns = opaque;
+
+    printf("MACIO: Read GPIO %lx/%d\n", (unsigned long)addr, size);
+
+    /* Levels regs */
+    if (addr < 8) {
+        return ns->gpio_levels[addr];
+    }
+    addr -= 8;
+    if (addr < 36) {
+        return ns->gpio_regs[addr];
+    }
+    return 0;
+}
+
+static const MemoryRegionOps gpio_ops = {
+    .read = gpio_read,
+    .write = gpio_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .impl = {
+        .min_access_size = 1, // XXX Check these
+        .max_access_size = 1,
+    },
 };
 
 static void macio_newworld_realize(PCIDevice *d, Error **errp)
@@ -276,6 +374,7 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
     Error *err = NULL;
     SysBusDevice *sysbus_dev;
     MemoryRegion *timer_memory = NULL;
+    MemoryRegion *gpio_memory = NULL;
     int i;
     int cur_irq = 0;
 
@@ -285,7 +384,12 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
         return;
     }
 
-    sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
+
+    if (s->has_pmu) {
+        sysbus_dev = SYS_BUS_DEVICE(s->pmu);
+    } else {
+        sysbus_dev = SYS_BUS_DEVICE(&s->cuda);
+    }
     sysbus_connect_irq(sysbus_dev, 0, ns->irqs[cur_irq++]);
 
     if (s->pic_mem) {
@@ -310,6 +414,12 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
     memory_region_init_io(timer_memory, OBJECT(s), &timer_ops, NULL, "timer",
                           0x1000);
     memory_region_add_subregion(&s->bar, 0x15000, timer_memory);
+
+    /* GPIO registers */
+    ns->gpio1_irq = cur_irq++;
+    gpio_memory = g_new(MemoryRegion, 1);
+    memory_region_init_io(gpio_memory, OBJECT(s), &gpio_ops, ns, "gpio", 0x30);
+    memory_region_add_subregion(&s->bar, 0x50, gpio_memory);
 }
 
 static void macio_newworld_init(Object *obj)
@@ -330,10 +440,6 @@ static void macio_instance_init(Object *obj)
     MacIOState *s = MACIO(obj);
 
     memory_region_init(&s->bar, obj, "macio", 0x80000);
-
-    object_initialize(&s->cuda, sizeof(s->cuda), TYPE_CUDA);
-    qdev_set_parent_bus(DEVICE(&s->cuda), sysbus_get_default());
-    object_property_add_child(obj, "cuda", OBJECT(&s->cuda), NULL);
 }
 
 static const VMStateDescription vmstate_macio_oldworld = {
@@ -378,6 +484,7 @@ static void macio_newworld_class_init(ObjectClass *oc, void *data)
 
 static Property macio_properties[] = {
     DEFINE_PROP_UINT64("frequency", MacIOState, frequency, 0),
+    DEFINE_PROP_BOOL("has_pmu", MacIOState, has_pmu, false),
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -430,14 +537,25 @@ void macio_init(PCIDevice *d,
                 MemoryRegion *pic_mem,
                 MemoryRegion *escc_mem)
 {
-    MacIOState *macio_state = MACIO(d);
+    MacIOState *s = MACIO(d);
 
-    macio_state->pic_mem = pic_mem;
-    macio_state->escc_mem = escc_mem;
-    /* Note: this code is strongly inspirated from the corresponding code
-       in PearPC */
-    qdev_prop_set_uint64(DEVICE(&macio_state->cuda), "frequency",
-                         macio_state->frequency);
+    s->pic_mem = pic_mem;
+    s->escc_mem = escc_mem;
+
+    if (s->has_pmu) {
+        printf("MACIO: Creating PMU\n");
+        s->pmu = qdev_create(NULL, "via-pmu");
+        object_property_add_child(OBJECT(s), "pmu", OBJECT(s->pmu), NULL);
+        qdev_prop_set_uint64(s->pmu, "frequency", s->frequency);
+        qdev_prop_set_ptr(s->pmu, "macio", s);
+   } else {
+        printf("MACIO: Creating CUDA\n");
+        object_initialize(&s->cuda, sizeof(s->cuda), TYPE_CUDA);
+        qdev_set_parent_bus(DEVICE(&s->cuda), sysbus_get_default());
+        object_property_add_child(OBJECT(s), "cuda", OBJECT(&s->cuda), NULL);
+        qdev_prop_set_uint64(DEVICE(&s->cuda), "frequency",
+                             s->frequency);
+    }
 
     qdev_init_nofail(DEVICE(d));
 }
