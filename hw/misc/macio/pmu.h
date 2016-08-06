@@ -38,6 +38,8 @@
 #define PMU_GET_BRIGHTBUTTON	0xd9	/* report brightness up/down pos */
 #define PMU_GET_COVER		0xdc	/* report cover open/closed */
 #define PMU_SYSTEM_READY	0xdf	/* tell PMU we are awake */
+#define PMU_DOWNLOAD_STATUS     0xe2    /* Called by MacOS during boot... */
+#define PMU_READ_PMU_RAM	0xe8	/* read the PMU RAM... ??? */
 #define PMU_GET_VERSION		0xea	/* read the PMU version */
 
 /* Bits to use with the PMU_POWER_CTRL0 command */

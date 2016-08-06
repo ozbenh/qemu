@@ -39,6 +39,7 @@
 /* XXX: implement all timer modes */
 
 #undef DEBUG_PMU
+#undef DEBUG_PMU_AUTOPOLL
 #undef DEBUG_PMU_ALL_MMIO
 #undef DEBUG_PMU_PROTOCOL
 #undef DEBUG_VIA
@@ -152,8 +153,7 @@ typedef enum {
 #define VIA_PMU(obj) OBJECT_CHECK(PMUState, (obj), TYPE_VIA_PMU)
 
 /* XXX FIXME */
-//#define VIA_TIMER_FREQ (4700000 / 6)
-#define VIA_TIMER_FREQ (4700000 / 1)
+#define VIA_TIMER_FREQ (4700000 / 6)
 
 /**
  * VIATimer:
@@ -204,20 +204,16 @@ typedef struct PMUState {
     VIATimer timers[2];
     uint64_t frequency;
     qemu_irq via_irq;
+    bool via_irq_state;
 
     /* MacOS 9 is racy and requires a delay upon setting the SR_INT bit */
     QEMUTimer *sr_delay_timer;
 
     /* --- PMU state --- */
 
-    /* PMU state */
-    ADBBusState adb_bus;
-    uint32_t tick_offset;
-    uint8_t last_b;
-    uint8_t intbits;
-    uint8_t intmask;
-
+    /* PMU low level protocol state */
     PMUCmdState cmd_state;
+    uint8_t last_b;
     uint8_t cmd;
     int cmdlen;
     int rsplen;
@@ -227,10 +223,24 @@ typedef struct PMUState {
     uint8_t cmd_rsp_sz;
     uint8_t cmd_rsp[128];
 
+    /* PMU events/interrupts */
+    uint8_t intbits;
+    uint8_t intmask;
+
+    /* ADB */
+    bool has_adb;
+    ADBBusState adb_bus;
     uint16_t adb_poll_mask;
     uint8_t autopoll_rate_ms;
-    uint8_t autopoll;
+    uint8_t autopoll_mask;
     QEMUTimer *adb_poll_timer;
+    uint8_t adb_reply_size;
+    uint8_t adb_reply[ADB_MAX_OUT_LEN];
+
+    /* RTC */
+    uint32_t tick_offset;
+    QEMUTimer *one_sec_timer;
+    int64_t one_sec_target;
 
     /* XXX HACK */
     void *macio;
@@ -240,10 +250,11 @@ static void via_timer_update(PMUState *s, VIATimer *ti, int64_t current_time);
 
 static void via_update_irq(PMUState *s)
 {
-    if (s->ifr & s->ier & (SR_INT | T1_INT | T2_INT)) {
-        qemu_irq_raise(s->via_irq);
-    } else {
-        qemu_irq_lower(s->via_irq);
+    bool new_state = !!(s->ifr & s->ier & (SR_INT | T1_INT | T2_INT));
+
+    if (new_state != s-> via_irq_state) {
+        s-> via_irq_state = new_state;
+        qemu_set_irq(s->via_irq, new_state);
     }
 }
 
@@ -384,29 +395,45 @@ static void via_delay_set_sr_int(PMUState *s)
     timer_mod(s->sr_delay_timer, expire);
 }
 
-static void pmu_adb_poll(void *opaque)
-{
-#if 0
-    PMUState *s = opaque;
-    uint8_t obuf[ADB_MAX_OUT_LEN + 2];
-    int olen;
-
-    olen = adb_poll(&s->adb_bus, obuf + 2, s->adb_poll_mask);
-    if (olen > 0) {
-        obuf[0] = ADB_PACKET;
-        obuf[1] = 0x40; /* polled data */
-        cuda_send_packet_to_host(s, obuf, olen + 2);
-    }
-    timer_mod(s->adb_poll_timer,
-                   qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                   (NANOSECONDS_PER_SECOND / (1000 / s->autopoll_rate_ms)));
-#endif
-}
-
 static void pmu_update_extirq(PMUState *s)
 {
-        //. XXX
-    MacIOSetGPIO(s->macio, 9, false);
+    if ((s->intbits & s->intmask) != 0) {
+        MacIOSetGPIO(s->macio, 1, false);
+    } else {
+        MacIOSetGPIO(s->macio, 1, true);
+    }
+}
+
+static void pmu_adb_poll(void *opaque)
+{
+    PMUState *s = opaque;
+    int olen;
+
+    if (!(s->intbits & PMU_INT_ADB)) {
+        /* XXX Check this */
+        olen = adb_poll(&s->adb_bus, s->adb_reply, s->adb_poll_mask);
+#ifdef DEBUG_PMU_AUTOPOLL
+        PMU_DPRINTF("ADB autopoll, olen=%d\n", olen);
+#endif
+        if (olen > 0) {
+            s->adb_reply_size = olen;
+            s->intbits |= PMU_INT_ADB | PMU_INT_ADB_AUTO;
+            pmu_update_extirq(s);
+        }
+    }
+    timer_mod(s->adb_poll_timer,
+              qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 30);
+}
+
+static void pmu_one_sec_timer(void *opaque)
+{
+    PMUState *s = opaque;
+
+    PMU_DPRINTF("PMU one sec...\n");
+    s->intbits |= PMU_INT_TICK;
+    pmu_update_extirq(s);
+    s->one_sec_target += 1000;
+    timer_mod(s->one_sec_timer, s->one_sec_target);
 }
 
 static void pmu_cmd_int_ack(PMUState *s,
@@ -417,10 +444,22 @@ static void pmu_cmd_int_ack(PMUState *s,
         PMU_DPRINTF("INT_ACK command, invalid len: %d want: 0\n", in_len);
         return;
     }
-    out_data[0] = s->intbits;
-    s->intbits = 0;
+    /* Make appropriate reply packet */
+    if (s->intbits & PMU_INT_ADB) {
+        if (!s->adb_reply_size) {
+            PMU_DPRINTF("Odd, PMU_INT_ADB set with no reply in buffer\n");
+        }
+        memcpy(out_data + 1, s->adb_reply, s->adb_reply_size);
+        out_data[0] = s->intbits & (PMU_INT_ADB | PMU_INT_ADB_AUTO);
+        *out_len = s->adb_reply_size + 1;
+        s->intbits &= ~(PMU_INT_ADB | PMU_INT_ADB_AUTO);
+        s->adb_reply_size = 0;
+    } else {
+        out_data[0] = s->intbits;
+        s->intbits = 0;
+        *out_len = 1;
+    }
     pmu_update_extirq(s);
-    *out_len = 1;
 }
 
 static void pmu_cmd_set_int_mask(PMUState *s,
@@ -431,31 +470,91 @@ static void pmu_cmd_set_int_mask(PMUState *s,
         PMU_DPRINTF("SET_INT_MASK command, invalid len: %d want: 1\n", in_len);
         return;
     }
-    s->intmask = in_data[0];
+
     PMU_DPRINTF("Setting PMU int mask to 0x%02x\n", s->intmask);
+    s->intmask = in_data[0];
     pmu_update_extirq(s);
+}
+
+static void pmu_cmd_set_adb_autopoll(PMUState *s, uint16_t mask)
+{
+    PMU_DPRINTF("ADB set autopoll, mask=%04x\n", mask);
+
+    if (s->autopoll_mask == mask) {
+        return;
+    }
+    s->autopoll_mask = mask;
+    if (mask) {
+        timer_mod(s->adb_poll_timer,
+                  qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 30);
+    } else {
+        timer_del(s->adb_poll_timer);
+    }
 }
 
 static void pmu_cmd_adb(PMUState *s,
                         const uint8_t *in_data, uint8_t in_len,
                         uint8_t *out_data, uint8_t *out_len)
 {
-    if (in_len != 0) {
-        PMU_DPRINTF("ADB POLL OFF command, invalid len: %d want: 0\n", in_len);
+    int len, adblen;
+    uint8_t adb_cmd[255];
+
+    if (in_len < 2) {
+        PMU_DPRINTF("ADB PACKET, invalid len: %d want at least 2\n", in_len);
         return;
     }
 
-    if (s->autopoll) {
-            timer_del(s->adb_poll_timer);
-            s->autopoll = false;
+    *out_len = 0;
+
+    if (!s->has_adb) {
+        PMU_DPRINTF("ADB PACKET with no ADB bus !\n");
+        return;
     }
-#if 0
-    if (autopoll) {
-            timer_mod(s->adb_poll_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                      (NANOSECONDS_PER_SECOND / (1000 / s->autopoll_rate_ms)));
+    /* Set autopoll is a special form of the command */
+    if (in_data[0] == 0 && in_data[1] == 0x86) {
+        uint16_t mask = in_data[2];
+        mask = (mask << 8) | in_data[3];
+        if (in_len != 4) {
+                PMU_DPRINTF("ADB Autopoll requires 4 bytes, got %d\n", in_len);
+                return;
+        }
+        pmu_cmd_set_adb_autopoll(s, mask);
+        return;
     }
-#endif
+    PMU_DPRINTF("ADB request: "
+                "len=%d,cmd=0x%02x,pflags=0x%02x,adblen=%d: %02x %02x...\n",
+                in_len, in_data[0], in_data[1],
+                in_data[2], in_data[3], in_data[4]);
+    *out_len = 0;
+
+    /* Check ADB len */
+    adblen = in_data[2];
+    if (adblen > (in_len - 3)) {
+        PMU_DPRINTF("ADB len is %d > %d (in_len -3)...erroring \n",
+                    adblen, in_len - 3);
+        len = -1;
+    } else if (adblen > 252) {
+        PMU_DPRINTF("ADB command too big !\n");
+        len = -1;
+    } else {
+        /* Format command */
+        adb_cmd[0] = in_data[0];
+        memcpy(&adb_cmd[1], &in_data[3], in_len - 3);
+        len = adb_request(&s->adb_bus, s->adb_reply + 2, adb_cmd, in_len - 2);
+        PMU_DPRINTF("ADB reply is %d bytes\n", len);
+    }
+    if (len > 0) {
+        /* XXX Check this */
+        s->adb_reply_size = len + 2;
+        s->adb_reply[0] = 0x01;
+        s->adb_reply[1] = len;
+    } else {
+        /* XXX Check this */
+        s->adb_reply_size = 1;
+        s->adb_reply[0] = 0x00;
+    }
+    s->intbits |= PMU_INT_ADB;
+    pmu_update_extirq(s);
 }
 
 static void pmu_cmd_adb_poll_off(PMUState *s,
@@ -467,17 +566,10 @@ static void pmu_cmd_adb_poll_off(PMUState *s,
         return;
     }
 
-    if (s->autopoll) {
-            timer_del(s->adb_poll_timer);
-            s->autopoll = false;
+    if (s->has_adb && s->autopoll_mask) {
+        timer_del(s->adb_poll_timer);
+        s->autopoll_mask = false;
     }
-#if 0
-    if (autopoll) {
-            timer_mod(s->adb_poll_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                      (NANOSECONDS_PER_SECOND / (1000 / s->autopoll_rate_ms)));
-    }
-#endif
 }
 
 static void pmu_cmd_shutdown(PMUState *s,
@@ -558,8 +650,8 @@ static void pmu_cmd_get_version(PMUState *s,
                                 const uint8_t *in_data, uint8_t in_len,
                                 uint8_t *out_data, uint8_t *out_len)
 {
-        *out_len = 1;
-        *out_data = 1; /* ??? Check what Apple does */
+    *out_len = 1;
+    *out_data = 1; /* ??? Check what Apple does */
 }
 
 static void pmu_cmd_power_events(PMUState *s,
@@ -595,6 +687,43 @@ static void pmu_cmd_power_events(PMUState *s,
     }
 }
 
+static void pmu_cmd_get_cover(PMUState *s,
+                              const uint8_t *in_data, uint8_t in_len,
+                              uint8_t *out_data, uint8_t *out_len)
+{
+    /* Not 100% sure here, will have to check what a real Mac
+     * returns other than byte 0 bit 0 is LID closed on laptops
+     */
+    *out_len = 1;
+    *out_data = 0x00;
+}
+
+static void pmu_cmd_download_status(PMUState *s,
+                                    const uint8_t *in_data, uint8_t in_len,
+                                    uint8_t *out_data, uint8_t *out_len)
+{
+    /* This has to do with PMU firmware updates as far as I can tell.
+     *
+     * We return 0x62 which is what OpenPMU expects
+     */
+    *out_len = 1;
+    *out_data = 0x62;
+}
+
+static void pmu_cmd_read_pmu_ram(PMUState *s,
+                                 const uint8_t *in_data, uint8_t in_len,
+                                 uint8_t *out_data, uint8_t *out_len)
+{
+    if (in_len < 3) {
+        PMU_DPRINTF("READ_PMU_RAM command, invalid len %d, expected 3\n",
+                    in_len);
+        return;
+    }
+    PMU_DPRINTF("Unsupported READ_PMU_RAM, args: %02x %02x %02x\n",
+                in_data[0], in_data[1], in_data[2]);
+    *out_len = 0;
+}
+
 /* description of commands */
 typedef struct PMUCmdHandler {
     uint8_t command;
@@ -616,6 +745,9 @@ static const PMUCmdHandler PMUCmdHandlers[] = {
     { PMU_SYSTEM_READY, "SYSTEM READY", pmu_cmd_system_ready },
     { PMU_GET_VERSION, "GET VERSION", pmu_cmd_get_version },
     { PMU_POWER_EVENTS, "POWER EVENTS", pmu_cmd_power_events },
+    { PMU_GET_COVER, "GET_COVER", pmu_cmd_get_cover },
+    { PMU_DOWNLOAD_STATUS, "DOWNLOAD STATUS", pmu_cmd_download_status },
+    { PMU_READ_PMU_RAM, "READ PMGR RAM", pmu_cmd_read_pmu_ram },
     // .../...
 };
 
@@ -1041,6 +1173,9 @@ static void pmu_reset(DeviceState *dev)
     s->ifr = 0;
     s->ier = 0;
     s->anh = 0;
+    // XXX OPENBIOS needs to do this ? MacOS 9 needs it
+    s->intmask = PMU_INT_ADB | PMU_INT_TICK;
+    s->intbits = 0;
 
     s->timers[0].latch = 0xffff;
     set_counter(s, &s->timers[0], 0xffff);
@@ -1049,7 +1184,7 @@ static void pmu_reset(DeviceState *dev)
     s->sr_delay_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, via_set_sr_int, s);
 
     s->cmd_state = pmu_state_idle;
-    s->autopoll = 0;
+    s->autopoll_mask = 0;
 }
 
 static void pmu_realizefn(DeviceState *dev, Error **errp)
@@ -1057,7 +1192,7 @@ static void pmu_realizefn(DeviceState *dev, Error **errp)
     PMUState *s = VIA_PMU(dev);
     struct tm tm;
 
-    printf("PMU: realize, macio=%p\n", s->macio);
+    PMU_DPRINTF("realize, macio=%p\n", s->macio);
 
     s->timers[0].timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, via_timer1, s);
     s->timers[0].frequency = s->frequency;
@@ -1066,10 +1201,21 @@ static void pmu_realizefn(DeviceState *dev, Error **errp)
 
     qemu_get_timedate(&tm, 0);
     s->tick_offset = (uint32_t)mktimegm(&tm) + RTC_OFFSET;
+    s->one_sec_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, pmu_one_sec_timer, s);
+    s->one_sec_target = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 1000;
+    timer_mod(s->one_sec_timer, s->one_sec_target);
 
-    s->adb_poll_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, pmu_adb_poll, s);
-    s->autopoll_rate_ms = 20;
-    s->adb_poll_mask = 0xffff;
+    if (s->has_adb) {
+        PMU_DPRINTF("PMU: Creating ADB bus\n");
+        qbus_create_inplace(&s->adb_bus, sizeof(s->adb_bus), TYPE_ADB_BUS,
+                            DEVICE(dev), "adb.0");
+        s->adb_poll_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, pmu_adb_poll, s);
+        s->autopoll_rate_ms = 20;
+        s->adb_poll_mask = 0xffff;
+    }
+
+    /* GPIO is up by default */
+    MacIOSetGPIO(s->macio, 1, true);
 }
 
 static void pmu_initfn(Object *obj)
@@ -1086,16 +1232,13 @@ static void pmu_initfn(Object *obj)
     for (i = 0; i < ARRAY_SIZE(s->timers); i++) {
         s->timers[i].index = i;
     }
-
-    PMU_DPRINTF("PMU: Creating ADB bus\n");
-    qbus_create_inplace(&s->adb_bus, sizeof(s->adb_bus), TYPE_ADB_BUS,
-                        DEVICE(obj), "adb.0");
 }
 
 static Property pmu_properties[] = {
     // XXX Add a "has ADB" property
     DEFINE_PROP_UINT64("frequency", PMUState, frequency, 0),
     DEFINE_PROP_PTR("macio", PMUState, macio),
+    DEFINE_PROP_BOOL("has_adb", PMUState, has_adb, true),
     DEFINE_PROP_END_OF_LIST()
 };
 

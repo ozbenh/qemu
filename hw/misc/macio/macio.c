@@ -294,8 +294,8 @@ static void gpio_write(void *opaque, hwaddr addr, uint64_t value,
 {
     NewWorldMacIOState *ns = opaque;
 
-    printf("MACIO: Write GPIO %lx/%d = %lx\n",
-           (unsigned long)addr, size, (unsigned long)value);
+//    printf("MACIO: Write GPIO %lx/%d = %lx\n",
+//           (unsigned long)addr, size, (unsigned long)value);
 
     /* Levels regs are read-only */
     if (addr < 8) {
@@ -320,28 +320,65 @@ static void gpio_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
+static uint64_t gpio_read(void *opaque, hwaddr addr, unsigned size)
+{
+    NewWorldMacIOState *ns = opaque;
+
+//    printf("MACIO: Read GPIO %lx/%d\n", (unsigned long)addr, size);
+
+    /* Levels regs */
+    if (addr < 8) {
+        return ns->gpio_levels[addr];
+    }
+    addr -= 8;
+    if (addr < 36) {
+//        printf("MACIO:  GPIO%d = %02x\n", (int)addr, ns->gpio_regs[addr]);
+        return ns->gpio_regs[addr];
+    }
+    return 0;
+}
+
 void MacIOSetGPIO(DeviceState *dev, uint32_t gpio, bool state)
 {
     NewWorldMacIOState *ns = NEWWORLD_MACIO(dev);
+    uint8_t new_reg;
 
     if (ns->gpio_regs[gpio] & 4) {
         printf("MACIO: Setting GPIO %d while it's an output\n", gpio);
     }
-    ns->gpio_regs[gpio] = ns->gpio_regs[gpio] & 2;
+
+    new_reg = ns->gpio_regs[gpio] & ~2;
     if (state) {
-        ns->gpio_regs[gpio] |= 2;
+        new_reg |= 2;
     }
+    if (new_reg == ns->gpio_regs[gpio]) {
+        return;
+    }
+    ns->gpio_regs[gpio] = new_reg;
+
     // XXX Update the levels summary
-    // XXX Update the interrupts
+
+    /* This is will work until we fix the binding between MacIO and
+     * the MPIC properly so we can route all GPIOs and avoid going
+     * via the top level platform code.
+     *
+     * Note that we probably need to get access to the MPIC config to
+     * decode polarity since qemu always use "raise" regardless.
+     *
+     * For now, we hard wire known GPIOs
+     */
     if (gpio == 1) {
-        if (state) {
-            printf("Raising GPIO1 !\n");
+         /* Level low */
+        if (!state) {
+//            printf("Raising GPIO1 !\n");
             qemu_irq_raise(ns->irqs[ns->gpio1_irq]);
         } else {
+//            printf("Lowering GPIO1 !\n");
             qemu_irq_lower(ns->irqs[ns->gpio1_irq]);
         }
     }
     if (gpio == 9) {
+         /* Edge, triggered by NMI below */
         if (state) {
             printf("Raising GPIO9 !\n");
             qemu_irq_raise(ns->irqs[ns->pswitch_irq]);
@@ -355,23 +392,6 @@ static void macio_nmi(NMIState *n, int cpu_index, Error **errp)
 {
     MacIOSetGPIO(DEVICE(n), 9, true);
     MacIOSetGPIO(DEVICE(n), 9, false);
-}
-
-static uint64_t gpio_read(void *opaque, hwaddr addr, unsigned size)
-{
-    NewWorldMacIOState *ns = opaque;
-
-    printf("MACIO: Read GPIO %lx/%d\n", (unsigned long)addr, size);
-
-    /* Levels regs */
-    if (addr < 8) {
-        return ns->gpio_levels[addr];
-    }
-    addr -= 8;
-    if (addr < 36) {
-        return ns->gpio_regs[addr];
-    }
-    return 0;
 }
 
 static const MemoryRegionOps gpio_ops = {
