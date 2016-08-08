@@ -299,14 +299,13 @@ static int adb_kbd_request(ADBDevice *d, uint8_t *obuf,
             case ADB_CMD_CHANGE_ID_AND_ACT:
             case ADB_CMD_CHANGE_ID_AND_ENABLE:
                 d->devaddr = buf[1] & 0xf;
-                ADB_DPRINTF("KBD: Change addr(1) to 0x%x\n", d->devaddr);
+                ADB_DPRINTF("KBD: Change addr to 0x%x\n", d->devaddr);
                 break;
             default:
-                /* XXX: check this */
-                d->devaddr = buf[1] & 0xf;
-                d->handler = buf[2];
-                ADB_DPRINTF("KBD: Change addr & handler to 0x%x,0x%x\n",
-                            d->devaddr, d->handler);
+                /* Don't change address on normal writes, only support
+                 * handler 1 (Apple Standard Keyboard) for the time
+                 * being. So we just ignore writes to register 3.
+                 */
                 break;
             }
         }
@@ -515,11 +514,10 @@ static int adb_mouse_request(ADBDevice *d, uint8_t *obuf,
                 ADB_DPRINTF("MOUSE: Change addr(1) to 0x%x\n", d->devaddr);
                 break;
             default:
-                /* XXX: check this */
-                d->devaddr = buf[1] & 0xf;
-                //d->handler = buf[2];
-                ADB_DPRINTF("MOUSE: Change addr & handler to 0x%x,0x%x\n",
-                            d->devaddr, d->handler);
+                /* Don't change address on normal writes, only support
+                 * handler 2 (Apple Classic Mouse 200cpi) for the time
+                 * being. So we just ignore writes to register 3.
+                 */
                 break;
             }
         }
