@@ -81,11 +81,12 @@ static int __adb_request(ADBBusState *s, uint8_t *obuf, const uint8_t *buf,
     }
     devaddr = buf[0] >> 4;
     if (!autopoll) {
-        ADB_DPRINTF("Req for dev 0x%02x r(%d): %02x %02x %02x...\n",
+        ADB_DPRINTF("Req for dev 0x%02x r(%d): %02x %02x %02x %02x...\n",
                     devaddr, len,
                     buf[0],
                     len > 1 ? buf[1] : 0,
-                    len > 2 ? buf[2] : 0);
+                    len > 2 ? buf[2] : 0,
+                    len > 3 ? buf[3] : 0);
     }
     for(i = 0; i < s->nb_devices; i++) {
         d = s->devices[i];
