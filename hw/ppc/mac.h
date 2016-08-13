@@ -134,7 +134,9 @@ typedef struct MACIOIDEState {
     SysBusDevice parent_obj;
     /*< public >*/
 
-    qemu_irq irq;
+    qemu_irq real_ide_irq;
+    qemu_irq real_dma_irq;
+    qemu_irq ide_irq;
     qemu_irq dma_irq;
 
     MemoryRegion mem;
@@ -142,6 +144,8 @@ typedef struct MACIOIDEState {
     IDEDMA dma;
     void *dbdma;
     bool dma_active;
+    uint32_t timing_reg;
+    uint32_t irq_reg;
 } MACIOIDEState;
 
 void macio_ide_init_drives(MACIOIDEState *ide, DriveInfo **hd_table);
