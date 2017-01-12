@@ -959,8 +959,13 @@ static inline void do_rfi(CPUPPCState *env, target_ulong nip, target_ulong msr)
 {
     CPUState *cs = CPU(ppc_env_get_cpu(env));
 
-    /* MSR:POW cannot be set by any form of rfi */
-    msr &= ~(1ULL << MSR_POW);
+    /* These bits cannot be set by RFI on non-BookE systems and so must
+     * be filtered out. 6xx and 7xxx with SW TLB management will put
+     * TLB related junk in there among other things.
+     */
+    if (!(env->excp_model & POWERPC_EXCP_BOOKE)) {
+            msr &= ~(target_ulong)0xf0000;
+    }
 
 #if defined(TARGET_PPC64)
     /* Switching to 32-bit ? Crop the nip */
@@ -990,7 +995,6 @@ void helper_rfi(CPUPPCState *env)
     do_rfi(env, env->spr[SPR_SRR0], env->spr[SPR_SRR1] & 0xfffffffful);
 }
 
-#define MSR_BOOK3S_MASK
 #if defined(TARGET_PPC64)
 void helper_rfid(CPUPPCState *env)
 {
