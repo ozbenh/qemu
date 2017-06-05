@@ -1491,6 +1491,37 @@ static uint32_t cas_check_pvr(sPAPRMachineState *spapr, PowerPCCPU *cpu,
     return best_compat;
 }
 
+static void cas_enable_large_decr(PowerPCCPU *cpu, sPAPRMachineState *spapr)
+{
+    PowerPCCPUClass *pcc = POWERPC_CPU_GET_CLASS(cpu);
+    bool guest_large_decr = false;
+
+    if (cpu->compat_pvr) {
+        guest_large_decr = cpu->compat_pvr >= CPU_POWERPC_LOGICAL_3_00;
+    } else {
+        guest_large_decr = (cpu->env.spr[SPR_PVR] & CPU_POWERPC_POWER_SERVER_MASK)
+                           >= CPU_POWERPC_POWER9_BASE;
+    }
+
+    if (guest_large_decr && ((!kvm_enabled()) ||
+                             kvmppc_has_cap_large_decr())) {
+        CPUState *cs;
+
+        CPU_FOREACH(cs) {
+            if (kvm_enabled()) {
+                kvmppc_configure_large_decrementer(cs, true);
+            } else {
+                spapr_set_all_lpcrs(LPCR_LD, LPCR_LD);
+            }
+        }
+
+        spapr->large_decr_bits = pcc->large_decr_bits;
+    } else {
+        /* By default the large decrementer is already disabled */
+        spapr->large_decr_bits = 0;
+    }
+}
+
 static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
                                                   sPAPRMachineState *spapr,
                                                   target_ulong opcode,
@@ -1611,6 +1642,9 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
     }
     spapr->cas_legacy_guest_workaround = !spapr_ovec_test(ov1_guest,
                                                           OV1_PPC_3_00);
+
+    cas_enable_large_decr(cpu, spapr);
+
     if (!spapr->cas_reboot) {
         /* If spapr_machine_reset() did not set up a HPT but one is necessary
          * (because the guest isn't going to use radix) then set it up here. */
