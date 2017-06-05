@@ -8935,6 +8935,7 @@ POWERPC_FAMILY(POWER9)(ObjectClass *oc, void *data)
     /* segment page size remain the same */
     pcc->hash64_opts = &ppc_hash64_opts_POWER7;
     pcc->radix_page_info = &POWER9_radix_page_info;
+    pcc->large_decr_bits = 56;
 #endif
     pcc->excp_model = POWERPC_EXCP_POWER9;
     pcc->bus_model = PPC_FLAGS_INPUT_POWER9;
