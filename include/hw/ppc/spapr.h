@@ -145,6 +145,7 @@ struct sPAPRMachineState {
     struct PPCTimebase tb;
     bool has_graphics;
     uint32_t vsmt;       /* Virtual SMT mode (KVM's "core stride") */
+    uint32_t large_decr_bits; /* Large decrementer width (0 -> not in use) */
 
     Notifier epow_notifier;
     QTAILQ_HEAD(, sPAPREventLogEntry) pending_events;
