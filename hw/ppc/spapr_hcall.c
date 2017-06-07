@@ -1496,7 +1496,9 @@ static void cas_enable_large_decr(PowerPCCPU *cpu, sPAPRMachineState *spapr)
     PowerPCCPUClass *pcc = POWERPC_CPU_GET_CLASS(cpu);
     bool guest_large_decr = false;
 
-    if (cpu->compat_pvr) {
+    if (spapr->large_decr_support == -1) {
+        /* Large decrementer disabled on the command line */
+    } else if (cpu->compat_pvr) {
         guest_large_decr = cpu->compat_pvr >= CPU_POWERPC_LOGICAL_3_00;
     } else {
         guest_large_decr = (cpu->env.spr[SPR_PVR] & CPU_POWERPC_POWER_SERVER_MASK)

@@ -171,6 +171,7 @@ struct sPAPRMachineState {
 
     /*< public >*/
     char *kvm_type;
+    int large_decr_support; /* 1 -> required | 0 -> default | -1 -> disable */
 
     const char *icp_type;
     int32_t irq_map_nr;
