@@ -43,6 +43,11 @@
 #include "hw/isa/isa.h"
 #include "hw/char/serial.h"
 #include "hw/timer/mc146818rtc.h"
+#include "hw/pci/pci.h"
+#include "hw/pci/pci_bus.h"
+#include "hw/pci/pci_bridge.h"
+#include "hw/pci/msi.h"
+#include "hw/pci-host/pnv_phb3.h"
 
 #include <libfdt.h>
 
@@ -640,6 +645,7 @@ static void ppc_powernv_init(MachineState *machine)
         object_property_set_int(chip, PNV_CHIP_HWID(i), "chip-id",
                                 &error_fatal);
         object_property_set_int(chip, smp_cores, "nr-cores", &error_fatal);
+        object_property_set_int(chip, 1, "num-phbs", &error_fatal);
         object_property_set_bool(chip, true, "realized", &error_fatal);
     }
     g_free(chip_typename);
@@ -886,6 +892,41 @@ static void pnv_chip_icp_realize(PnvChip *chip, Error **errp)
     g_free(typename);
 }
 
+static PnvPhb3State *pnv_chip_phb_realize(PnvChip *chip, int i, Error **errp)
+{
+    Error *error = NULL;
+    PnvPhb3State *phb = NULL;
+    Object *obj;
+    char name[32];
+
+    snprintf(name, sizeof(name), "phb[%d]", i);
+    obj = object_new(TYPE_PNV_PHB3);
+    qdev_set_parent_bus(DEVICE(obj), sysbus_get_default());
+    object_property_set_int(obj, i, "phb-id", &error_fatal);
+    object_property_set_int(obj, chip->chip_id, "chip-id", &error_fatal);
+    object_property_add_child(OBJECT(chip), name, obj, &error_fatal);
+    object_property_add_const_link(obj, "xics", qdev_get_machine(),
+                                   &error_fatal);
+    object_property_set_bool(obj, true, "realized", &error);
+    if (error) {
+        error_propagate(errp, error);
+        return NULL;
+    }
+
+    phb = PNV_PHB3(obj);
+
+    memory_region_add_subregion(&chip->xscom,
+                                (PNV_XSCOM_PBCQ_NEST_BASE + 0x400 * i) << 3,
+                                &phb->pbcq->xscom_nest_regs);
+    memory_region_add_subregion(&chip->xscom,
+                                (PNV_XSCOM_PBCQ_PCI_BASE + 0x400 * i) << 3,
+                                &phb->pbcq->xscom_pci_regs);
+    memory_region_add_subregion(&chip->xscom,
+                                (PNV_XSCOM_PBCQ_SPCI_BASE + 0x040 * i) << 3,
+                                &phb->pbcq->xscom_spci_regs);
+    return phb;
+}
+
 static void pnv_chip_realize(DeviceState *dev, Error **errp)
 {
     PnvChip *chip = PNV_CHIP(dev);
@@ -982,6 +1023,18 @@ static void pnv_chip_realize(DeviceState *dev, Error **errp)
         return;
     }
     pnv_xscom_add_subregion(chip, PNV_XSCOM_OCC_BASE, &chip->occ.xscom_regs);
+
+    /* MSIs are supported on this platform */
+    msi_nonbroken = true;
+
+    /* Create Power system Host Bridges 3 (PHB3) */
+    for (i = 0; i < chip->num_phbs; i++) {
+        chip->phbs[i] = pnv_chip_phb_realize(chip, i, &error);
+        if (error) {
+            error_propagate(errp, error);
+            return;
+        }
+    }
 }
 
 static Property pnv_chip_properties[] = {
@@ -990,6 +1043,7 @@ static Property pnv_chip_properties[] = {
     DEFINE_PROP_UINT64("ram-size", PnvChip, ram_size, 0),
     DEFINE_PROP_UINT32("nr-cores", PnvChip, nr_cores, 1),
     DEFINE_PROP_UINT64("cores-mask", PnvChip, cores_mask, 0x0),
+    DEFINE_PROP_UINT32("num-phbs", PnvChip, num_phbs, 1),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -1015,11 +1069,19 @@ static const TypeInfo pnv_chip_info = {
 static ICSState *pnv_ics_get(XICSFabric *xi, int irq)
 {
     PnvMachineState *pnv = POWERNV_MACHINE(xi);
-    int i;
+    int i, j;
 
     for (i = 0; i < pnv->num_chips; i++) {
         if (ics_valid_irq(&pnv->chips[i]->psi.ics, irq)) {
             return &pnv->chips[i]->psi.ics;
+        }
+        for (j = 0; j < pnv->chips[i]->num_phbs; j++) {
+            if (ics_valid_irq(pnv->chips[i]->phbs[j]->lsi_ics, irq)) {
+                return pnv->chips[i]->phbs[j]->lsi_ics;
+            }
+            if (ics_valid_irq(ICS_BASE(pnv->chips[i]->phbs[j]->msis), irq)) {
+                return ICS_BASE(pnv->chips[i]->phbs[j]->msis);
+            }
         }
     }
     return NULL;
@@ -1028,10 +1090,14 @@ static ICSState *pnv_ics_get(XICSFabric *xi, int irq)
 static void pnv_ics_resend(XICSFabric *xi)
 {
     PnvMachineState *pnv = POWERNV_MACHINE(xi);
-    int i;
+    int i, j;
 
     for (i = 0; i < pnv->num_chips; i++) {
         ics_resend(&pnv->chips[i]->psi.ics);
+        for (j = 0; j < pnv->chips[i]->num_phbs; j++) {
+            ics_resend(pnv->chips[i]->phbs[j]->lsi_ics);
+            ics_resend(ICS_BASE(pnv->chips[i]->phbs[j]->msis));
+        }
     }
 }
 
@@ -1062,7 +1128,7 @@ static void pnv_pic_print_info(InterruptStatsProvider *obj,
                                Monitor *mon)
 {
     PnvMachineState *pnv = POWERNV_MACHINE(obj);
-    int i;
+    int i, j;
     CPUState *cs;
 
     CPU_FOREACH(cs) {
@@ -1073,6 +1139,10 @@ static void pnv_pic_print_info(InterruptStatsProvider *obj,
 
     for (i = 0; i < pnv->num_chips; i++) {
         ics_pic_print_info(&pnv->chips[i]->psi.ics, mon);
+        for (j = 0; j < pnv->chips[i]->num_phbs; j++) {
+            ics_pic_print_info(pnv->chips[i]->phbs[j]->lsi_ics, mon);
+            ics_pic_print_info(ICS_BASE(pnv->chips[i]->phbs[j]->msis), mon);
+        }
     }
 }
 
