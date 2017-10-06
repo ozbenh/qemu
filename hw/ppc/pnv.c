@@ -642,7 +642,7 @@ static void ppc_powernv_init(MachineState *machine)
     MemoryRegion *ram;
     char *fw_filename;
     long fw_size;
-    int i;
+    int i, cores_per_chip;
     char *chip_typename;
     PCIBus *pbus;
     bool has_gfx = false;
@@ -714,6 +714,22 @@ static void ppc_powernv_init(MachineState *machine)
     }
 
     pnv->chips = g_new0(PnvChip *, pnv->num_chips);
+
+    /* If user has specified number of cores, use it. Otherwise, compute it. */
+    if (smp_cores != 1) {
+        cores_per_chip = smp_cores;
+    } else {
+        cores_per_chip = smp_cpus / (smp_threads * pnv->num_chips);
+    }
+
+    if (smp_cpus != (smp_threads * pnv->num_chips * cores_per_chip)) {
+        error_report("cpu topology not balanced: "
+                     "chips (%u) * cores (%u) * threads (%u) != "
+                     "number of cpus (%u)",
+                     pnv->num_chips, cores_per_chip, smp_threads, smp_cpus);
+        exit(1);
+    }
+
     for (i = 0; i < pnv->num_chips; i++) {
         char chip_name[32];
         Object *chip = object_new(chip_typename);
@@ -732,7 +748,7 @@ static void ppc_powernv_init(MachineState *machine)
         object_property_add_child(OBJECT(pnv), chip_name, chip, &error_fatal);
         object_property_set_int(chip, PNV_CHIP_HWID(i), "chip-id",
                                 &error_fatal);
-        object_property_set_int(chip, smp_cores, "nr-cores", &error_fatal);
+        object_property_set_int(chip, cores_per_chip, "nr-cores", &error_fatal);
         object_property_set_int(chip, 1, "num-phbs", &error_fatal);
         object_property_set_bool(chip, true, "realized", &error_fatal);
     }
