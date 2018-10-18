@@ -42,6 +42,8 @@ typedef enum PnvChipType {
     PNV_CHIP_POWER9,      /* AKA Nimbus */
 } PnvChipType;
 
+typedef struct PnvQuad PnvQuad;
+
 typedef struct PnvChip {
     /*< private >*/
     SysBusDevice parent_obj;
@@ -91,6 +93,9 @@ typedef struct Pnv9Chip {
     PnvPsi       psi;
     PnvLpcController lpc;
     PnvOCC       occ;
+
+    uint32_t     nr_quads;
+    PnvQuad      *quads;
 } Pnv9Chip;
 
 typedef struct PnvChipClass {

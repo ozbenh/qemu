@@ -47,4 +47,14 @@ typedef struct PnvCoreClass {
 #define PNV_CORE_TYPE_SUFFIX "-" TYPE_PNV_CORE
 #define PNV_CORE_TYPE_NAME(cpu_model) cpu_model PNV_CORE_TYPE_SUFFIX
 
+#define TYPE_PNV_QUAD "powernv-cpu-quad"
+#define PNV_QUAD(obj) \
+    OBJECT_CHECK(PnvQuad, (obj), TYPE_PNV_QUAD)
+
+typedef struct PnvQuad {
+    DeviceState parent_obj;
+
+    uint32_t id;
+    MemoryRegion xscom_regs;
+} PnvQuad;
 #endif /* _PPC_PNV_CORE_H */
