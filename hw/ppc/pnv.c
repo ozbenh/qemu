@@ -743,7 +743,7 @@ static void pnv_chip_power8_instance_init(Object *obj)
     PnvChipClass *pcc = PNV_CHIP_GET_CLASS(obj);
     int i;
 
-    object_initialize(&chip8->psi, sizeof(chip8->psi), TYPE_PNV_PSI);
+    object_initialize(&chip8->psi, sizeof(chip8->psi), TYPE_PNV_PSI_POWER8);
     object_property_add_child(obj, "psi", OBJECT(&chip8->psi), NULL);
     object_property_add_const_link(OBJECT(&chip8->psi), "xics",
                                    OBJECT(qdev_get_machine()), &error_abort);
@@ -923,6 +923,11 @@ static void pnv_chip_power9_instance_init(Object *obj)
     object_property_add_child(obj, "xive", OBJECT(&chip9->xive), NULL);
     object_property_add_const_link(OBJECT(&chip9->xive), "chip", obj,
                                    &error_abort);
+
+    object_initialize(&chip9->psi, sizeof(chip9->psi), TYPE_PNV_PSI_POWER9);
+    object_property_add_child(obj, "psi", OBJECT(&chip9->psi), NULL);
+    object_property_add_const_link(OBJECT(&chip9->psi), "chip", obj,
+                                   &error_abort);
 }
 
 static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
@@ -955,6 +960,18 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
     qdev_set_parent_bus(DEVICE(&chip9->xive), sysbus_get_default());
     pnv_xscom_add_subregion(chip, PNV9_XSCOM_XIVE_BASE,
                             &chip9->xive.xscom_regs);
+
+    /* Processor Service Interface (PSI) Host Bridge */
+    object_property_set_int(OBJECT(&chip9->psi), PNV9_PSIHB_BASE(chip),
+                            "bar", &error_fatal);
+    object_property_set_bool(OBJECT(&chip9->psi), true, "realized", &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+    qdev_set_parent_bus(DEVICE(&chip9->psi), sysbus_get_default());
+    pnv_xscom_add_subregion(chip, PNV9_XSCOM_PSIHB_BASE,
+                            &chip9->psi.xscom_regs);
 }
 
 static void pnv_chip_power9_class_init(ObjectClass *klass, void *data)
@@ -1188,6 +1205,7 @@ static void pnv_pic_print_info(InterruptStatsProvider *obj,
             Pnv9Chip *chip9 = PNV9_CHIP(chip);
 
              pnv_xive_pic_print_info(&chip9->xive, mon);
+             pnv_psi_pic_print_info(&chip9->psi, mon);
         } else {
             Pnv8Chip *chip8 = PNV8_CHIP(chip);
 
