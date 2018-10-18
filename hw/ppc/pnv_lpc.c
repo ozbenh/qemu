@@ -26,6 +26,7 @@
 
 #include "hw/ppc/pnv.h"
 #include "hw/ppc/pnv_lpc.h"
+#include "hw/ppc/pnv_lpc2ahb.h"
 #include "hw/ppc/pnv_xscom.h"
 #include "hw/ppc/fdt.h"
 
@@ -794,6 +795,8 @@ ISABus *pnv_lpc_isa_create(PnvLpcController *lpc, bool use_cpld, Error **errp)
     ISABus *isa_bus;
     qemu_irq *irqs;
     qemu_irq_handler handler;
+    AspeedSio *sio;
+    PnvLpc2Ahb *lpc2ahb;
 
     /* let isa_bus_new() create its own bridge on SysBus otherwise
      * devices speficied on the command line won't find the bus and
@@ -818,5 +821,23 @@ ISABus *pnv_lpc_isa_create(PnvLpcController *lpc, bool use_cpld, Error **errp)
     irqs = qemu_allocate_irqs(handler, lpc, ISA_NUM_IRQS);
 
     isa_bus_irqs(isa_bus, irqs);
+
+    /*
+     * Create a SuperIO controller and the pseudo LPC2AHB device
+     * giving access to some of the BMC controllers
+     */
+    sio = aspeed_sio_create(isa_bus);
+    lpc2ahb = pnv_lpc2ahb_create(sio, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return NULL;
+    }
+
+    /*
+     * Map PNOR on the LPC FW address space.
+     */
+    memory_region_add_subregion(&lpc->isa_fw, PNOR_SPI_OFFSET,
+                                &lpc2ahb->spi.mmio_flash);
+
     return isa_bus;
 }
