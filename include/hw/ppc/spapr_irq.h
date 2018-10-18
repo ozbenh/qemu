@@ -13,6 +13,7 @@
 /*
  * IRQ range offsets per device type
  */
+#define SPAPR_IRQ_IPI        0x0
 #define SPAPR_IRQ_EPOW       0x1000  /* XICS_IRQ_BASE offset */
 #define SPAPR_IRQ_HOTPLUG    0x1001
 #define SPAPR_IRQ_VIO        0x1100  /* 256 VIO devices */
@@ -33,7 +34,7 @@ typedef struct sPAPRIrq {
     uint32_t    nr_irqs;
     uint32_t    nr_msis;
 
-    void (*init)(sPAPRMachineState *spapr, Error **errp);
+    void (*init)(sPAPRMachineState *spapr, uint32_t nr_servers, Error **errp);
     int (*claim)(sPAPRMachineState *spapr, int irq, bool lsi, Error **errp);
     void (*free)(sPAPRMachineState *spapr, int irq, int num);
     qemu_irq (*qirq)(sPAPRMachineState *spapr, int irq);
@@ -42,6 +43,7 @@ typedef struct sPAPRIrq {
 
 extern sPAPRIrq spapr_irq_xics;
 extern sPAPRIrq spapr_irq_xics_legacy;
+extern sPAPRIrq spapr_irq_xive;
 
 int spapr_irq_claim(sPAPRMachineState *spapr, int irq, bool lsi, Error **errp);
 void spapr_irq_free(sPAPRMachineState *spapr, int irq, int num);
