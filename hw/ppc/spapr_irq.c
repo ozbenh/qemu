@@ -284,9 +284,22 @@ static void spapr_irq_init_xive(sPAPRMachineState *spapr, uint32_t nr_servers,
     spapr_irq_msi_init(spapr, smc->irq->nr_msis);
 
     /* KVM XIVE support */
-    if (kvm_enabled()) {
-        if (machine_kernel_irqchip_required(machine)) {
-            error_setg(errp, "kernel_irqchip requested. no XIVE support");
+    if (kvm_enabled() && machine_kernel_irqchip_allowed(machine)) {
+        spapr->xive_tctx_type = TYPE_XIVE_TCTX_KVM;
+        spapr->xive = spapr_xive_create(spapr, TYPE_SPAPR_XIVE_KVM, nr_irqs,
+                                        nr_servers, &local_err);
+
+        if (local_err && machine_kernel_irqchip_required(machine)) {
+            error_propagate(errp, local_err);
+            error_prepend(errp, "kernel_irqchip requested. no XIVE support");
+            return;
+        }
+
+        /*
+         * XIVE support is activated under KVM. No need to initialize
+         * the fallback mode under QEMU
+         */
+        if (spapr->xive) {
             return;
         }
     }
