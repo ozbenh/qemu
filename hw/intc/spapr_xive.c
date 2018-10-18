@@ -37,9 +37,9 @@ void spapr_xive_pic_print_info(sPAPRXive *xive, Monitor *mon)
     }
 }
 
-static void spapr_xive_reset(DeviceState *dev)
+static void spapr_xive_base_reset(DeviceState *dev)
 {
-    sPAPRXive *xive = SPAPR_XIVE(dev);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(dev);
     XiveSource *xsrc = &xive->source;
     int i;
 
@@ -67,9 +67,9 @@ static void spapr_xive_reset(DeviceState *dev)
     sysbus_mmio_map(SYS_BUS_DEVICE(xive), 0, xive->tm_base);
 }
 
-static void spapr_xive_instance_init(Object *obj)
+static void spapr_xive_base_instance_init(Object *obj)
 {
-    sPAPRXive *xive = SPAPR_XIVE(obj);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(obj);
 
     object_initialize(&xive->source, sizeof(xive->source), TYPE_XIVE_SOURCE);
     object_property_add_child(obj, "source", OBJECT(&xive->source), NULL);
@@ -80,9 +80,9 @@ static void spapr_xive_instance_init(Object *obj)
                               NULL);
 }
 
-static void spapr_xive_realize(DeviceState *dev, Error **errp)
+static void spapr_xive_base_realize(DeviceState *dev, Error **errp)
 {
-    sPAPRXive *xive = SPAPR_XIVE(dev);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(dev);
     XiveSource *xsrc = &xive->source;
     XiveENDSource *end_xsrc = &xive->end_source;
     Error *local_err = NULL;
@@ -128,16 +128,11 @@ static void spapr_xive_realize(DeviceState *dev, Error **errp)
     /* Allocate the routing tables */
     xive->eat = g_new0(XiveEAS, xive->nr_irqs);
     xive->endt = g_new0(XiveEND, xive->nr_ends);
-
-    /* TIMA */
-    memory_region_init_io(&xive->tm_mmio, OBJECT(xive), &xive_tm_ops, xive,
-                          "xive.tima", 4ull << TM_SHIFT);
-    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &xive->tm_mmio);
 }
 
 static int spapr_xive_get_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas)
 {
-    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(xrtr);
 
     if (lisn >= xive->nr_irqs) {
         return -1;
@@ -149,7 +144,7 @@ static int spapr_xive_get_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas)
 
 static int spapr_xive_set_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas)
 {
-    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(xrtr);
 
     if (lisn >= xive->nr_irqs) {
         return -1;
@@ -162,7 +157,7 @@ static int spapr_xive_set_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas)
 static int spapr_xive_get_end(XiveRouter *xrtr,
                               uint8_t end_blk, uint32_t end_idx, XiveEND *end)
 {
-    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(xrtr);
 
     if (end_idx >= xive->nr_ends) {
         return -1;
@@ -175,7 +170,7 @@ static int spapr_xive_get_end(XiveRouter *xrtr,
 static int spapr_xive_set_end(XiveRouter *xrtr,
                               uint8_t end_blk, uint32_t end_idx, XiveEND *end)
 {
-    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(xrtr);
 
     if (end_idx >= xive->nr_ends) {
         return -1;
@@ -188,7 +183,7 @@ static int spapr_xive_set_end(XiveRouter *xrtr,
 static int spapr_xive_get_nvt(XiveRouter *xrtr,
                               uint8_t nvt_blk, uint32_t nvt_idx, XiveNVT *nvt)
 {
-    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    sPAPRXive *xive = SPAPR_XIVE_BASE(xrtr);
     uint32_t vcpu_id = spapr_xive_nvt_to_target(xive, nvt_blk, nvt_idx);
     PowerPCCPU *cpu = spapr_find_cpu(vcpu_id);
 
@@ -214,7 +209,7 @@ static int spapr_xive_set_nvt(XiveRouter *xrtr,
 static int spapr_xive_get_nvt_info(XiveRouter *xrtr, PowerPCCPU *cpu,
                                    uint8_t *out_nvt_blk, uint32_t *out_nvt_idx)
 {
-    return spapr_xive_cpu_to_nvt(SPAPR_XIVE(xrtr), cpu, out_nvt_blk,
+    return spapr_xive_cpu_to_nvt(SPAPR_XIVE_BASE(xrtr), cpu, out_nvt_blk,
                                  out_nvt_idx);
 }
 
@@ -306,7 +301,7 @@ static const VMStateDescription vmstate_spapr_xive_eas = {
     },
 };
 
-static const VMStateDescription vmstate_spapr_xive = {
+static const VMStateDescription vmstate_spapr_xive_base = {
     .name = TYPE_SPAPR_XIVE,
     .version_id = 1,
     .minimum_version_id = 1,
@@ -320,7 +315,7 @@ static const VMStateDescription vmstate_spapr_xive = {
     },
 };
 
-static Property spapr_xive_properties[] = {
+static Property spapr_xive_base_properties[] = {
     DEFINE_PROP_UINT32("nr-irqs", sPAPRXive, nr_irqs, 0),
     DEFINE_PROP_UINT32("nr-ends",  sPAPRXive, nr_ends, 0),
     DEFINE_PROP_UINT64("vc-base", sPAPRXive, vc_base, SPAPR_XIVE_VC_BASE),
@@ -328,16 +323,16 @@ static Property spapr_xive_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void spapr_xive_class_init(ObjectClass *klass, void *data)
+static void spapr_xive_base_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     XiveRouterClass *xrc = XIVE_ROUTER_CLASS(klass);
 
     dc->desc    = "sPAPR XIVE Interrupt Controller";
-    dc->props   = spapr_xive_properties;
-    dc->realize = spapr_xive_realize;
-    dc->reset   = spapr_xive_reset;
-    dc->vmsd    = &vmstate_spapr_xive;
+    dc->props   = spapr_xive_base_properties;
+    dc->realize = spapr_xive_base_realize;
+    dc->reset   = spapr_xive_base_reset;
+    dc->vmsd    = &vmstate_spapr_xive_base;
 
     xrc->get_eas = spapr_xive_get_eas;
     xrc->set_eas = spapr_xive_set_eas;
@@ -348,16 +343,55 @@ static void spapr_xive_class_init(ObjectClass *klass, void *data)
     xrc->get_nvt_info  = spapr_xive_get_nvt_info;
 }
 
+static const TypeInfo spapr_xive_base_info = {
+    .name = TYPE_SPAPR_XIVE_BASE,
+    .parent = TYPE_XIVE_ROUTER,
+    .abstract = true,
+    .instance_init = spapr_xive_base_instance_init,
+    .instance_size = sizeof(sPAPRXive),
+    .class_init = spapr_xive_base_class_init,
+    .class_size = sizeof(sPAPRXiveClass),
+};
+
+static void spapr_xive_realize(DeviceState *dev, Error **errp)
+{
+    sPAPRXive *xive = SPAPR_XIVE(dev);
+    sPAPRXiveClass *sxc = SPAPR_XIVE_BASE_GET_CLASS(dev);
+    Error *local_err = NULL;
+
+    sxc->parent_realize(dev, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+
+    /* TIMA */
+    memory_region_init_io(&xive->tm_mmio, OBJECT(xive), &xive_tm_ops, xive,
+                          "xive.tima", 4ull << TM_SHIFT);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &xive->tm_mmio);
+}
+
+static void spapr_xive_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    sPAPRXiveClass *sxc = SPAPR_XIVE_BASE_CLASS(klass);
+
+    device_class_set_parent_realize(dc, spapr_xive_realize,
+                                    &sxc->parent_realize);
+}
+
 static const TypeInfo spapr_xive_info = {
     .name = TYPE_SPAPR_XIVE,
-    .parent = TYPE_XIVE_ROUTER,
-    .instance_init = spapr_xive_instance_init,
+    .parent = TYPE_SPAPR_XIVE_BASE,
+    .instance_init = spapr_xive_base_instance_init,
     .instance_size = sizeof(sPAPRXive),
     .class_init = spapr_xive_class_init,
+    .class_size = sizeof(sPAPRXiveClass),
 };
 
 static void spapr_xive_register_types(void)
 {
+    type_register_static(&spapr_xive_base_info);
     type_register_static(&spapr_xive_info);
 }
 
