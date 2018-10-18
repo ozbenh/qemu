@@ -24,6 +24,13 @@
 #define TYPE_PNV_LPC "pnv-lpc"
 #define PNV_LPC(obj) \
      OBJECT_CHECK(PnvLpcController, (obj), TYPE_PNV_LPC)
+#define TYPE_PNV_LPC_POWER8 TYPE_PNV_LPC "-POWER8"
+#define PNV_LPC_POWER8(obj) \
+    OBJECT_CHECK(PnvLpc, (obj), TYPE_PNV_LPC_POWER8)
+
+#define TYPE_PNV_LPC_POWER9 TYPE_PNV_LPC "-POWER9"
+#define PNV_LPC_POWER9(obj) \
+    OBJECT_CHECK(PnvLpc, (obj), TYPE_PNV_LPC_POWER9)
 
 typedef struct PnvLpcController {
     DeviceState parent;
@@ -50,6 +57,8 @@ typedef struct PnvLpcController {
     MemoryRegion opb_master_regs;
 
     /* OPB Master LS registers */
+    uint32_t opb_irq_route0;
+    uint32_t opb_irq_route1;
     uint32_t opb_irq_stat;
     uint32_t opb_irq_mask;
     uint32_t opb_irq_pol;
@@ -70,6 +79,21 @@ typedef struct PnvLpcController {
     PnvPsi *psi;
 } PnvLpcController;
 
+#define PNV_LPC_CLASS(klass) \
+     OBJECT_CLASS_CHECK(PnvLpcClass, (klass), TYPE_PNV_LPC)
+#define PNV_LPC_GET_CLASS(obj) \
+     OBJECT_GET_CLASS(PnvLpcClass, (obj), TYPE_PNV_LPC)
+
+typedef struct PnvLpcClass {
+    DeviceClass parent_class;
+
+    int psi_irq;
+
+    DeviceRealize parent_realize;
+} PnvLpcClass;
+
+
 ISABus *pnv_lpc_isa_create(PnvLpcController *lpc, bool use_cpld, Error **errp);
+int pnv_dt_lpc(PnvChip *chip, void *fdt, int root_offset);
 
 #endif /* _PPC_PNV_LPC_H */
