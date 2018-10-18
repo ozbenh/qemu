@@ -1730,6 +1730,7 @@ static int spapr_pre_load(void *opaque)
 static int spapr_post_load(void *opaque, int version_id)
 {
     sPAPRMachineState *spapr = (sPAPRMachineState *)opaque;
+    sPAPRMachineClass *smc = SPAPR_MACHINE_GET_CLASS(spapr);
     int err = 0;
 
     err = spapr_caps_post_migration(spapr);
@@ -1737,13 +1738,7 @@ static int spapr_post_load(void *opaque, int version_id)
         return err;
     }
 
-    if (!object_dynamic_cast(OBJECT(spapr->ics), TYPE_ICS_KVM)) {
-        CPUState *cs;
-        CPU_FOREACH(cs) {
-            PowerPCCPU *cpu = POWERPC_CPU(cs);
-            icp_resend(ICP(cpu->intc));
-        }
-    }
+    smc->irq->post_load(spapr);
 
     /* In earlier versions, there was no separate qdev for the PAPR
      * RTC, so the RTC offset was stored directly in sPAPREnvironment.

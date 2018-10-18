@@ -44,6 +44,7 @@ typedef struct sPAPRIrq {
                         void *fdt, uint32_t phandle);
     Object *(*cpu_intc_create)(sPAPRMachineState *spapr, Object *cpu,
                                Error **errp);
+    void (*post_load)(sPAPRMachineState *spapr);
 } sPAPRIrq;
 
 extern sPAPRIrq spapr_irq_xics;
