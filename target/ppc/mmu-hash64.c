@@ -453,7 +453,8 @@ void ppc_hash64_unmap_hptes(PowerPCCPU *cpu, const ppc_hash_pte64_t *hptes,
                         false, n * HASH_PTE_SIZE_64);
 }
 
-static unsigned hpte_page_shift(const PPCHash64SegmentPageSizes *sps,
+static unsigned hpte_page_shift(PowerPCCPU *cpu,
+                                const PPCHash64SegmentPageSizes *sps,
                                 uint64_t pte0, uint64_t pte1)
 {
     int i;
@@ -480,7 +481,7 @@ static unsigned hpte_page_shift(const PPCHash64SegmentPageSizes *sps,
             continue;
         }
 
-        mask = ((1ULL << ps->page_shift) - 1) & HPTE64_R_RPN;
+        mask = ((1ULL << ps->page_shift) - 1) & ppc_hash64_hpte_r_rpn(cpu);
 
         if ((pte1 & mask) == ((uint64_t)ps->pte_enc << HPTE64_R_RPN_SHIFT)) {
             return ps->page_shift;
@@ -488,6 +489,18 @@ static unsigned hpte_page_shift(const PPCHash64SegmentPageSizes *sps,
     }
 
     return 0; /* Bad page size encoding */
+}
+
+static bool ppc_hash64_hpte_v_compare(PowerPCCPU *cpu, target_ulong pte0,
+                                      target_ulong ptem)
+{
+    CPUPPCState *env = &cpu->env;
+
+    if (env->mmu_model == POWERPC_MMU_3_00) {
+        return HPTE64_V_COMPARE_3_0(pte0, ptem);
+    } else {
+        return HPTE64_V_COMPARE(pte0, ptem);
+    }
 }
 
 static hwaddr ppc_hash64_pteg_search(PowerPCCPU *cpu, hwaddr hash,
@@ -510,8 +523,8 @@ static hwaddr ppc_hash64_pteg_search(PowerPCCPU *cpu, hwaddr hash,
         pte1 = ppc_hash64_hpte1(cpu, pteg, i);
 
         /* This compares V, B, H (secondary) and the AVPN */
-        if (HPTE64_V_COMPARE(pte0, ptem)) {
-            *pshift = hpte_page_shift(sps, pte0, pte1);
+        if (ppc_hash64_hpte_v_compare(cpu, pte0, ptem)) {
+            *pshift = hpte_page_shift(cpu, sps, pte0, pte1);
             /*
              * If there is no match, ignore the PTE, it could simply
              * be for a different segment size encoding and the
@@ -571,7 +584,8 @@ static hwaddr ppc_hash64_htab_lookup(PowerPCCPU *cpu,
         epn = (eaddr & ~SEGMENT_MASK_256M) & epnmask;
         hash = vsid ^ (epn >> sps->page_shift);
     }
-    ptem = (slb->vsid & SLB_VSID_PTEM) | ((epn >> 16) & HPTE64_V_AVPN);
+    ptem = (slb->vsid & SLB_VSID_PTEM) | ((epn >> 16) &
+                                          ppc_hash64_hpte_v_avpn(cpu));
     ptem |= HPTE64_V_VALID;
 
     /* Page address translation */
@@ -625,7 +639,7 @@ unsigned ppc_hash64_hpte_page_shift_noslb(PowerPCCPU *cpu,
             break;
         }
 
-        shift = hpte_page_shift(sps, pte0, pte1);
+        shift = hpte_page_shift(cpu, sps, pte0, pte1);
         if (shift) {
             return shift;
         }
@@ -861,7 +875,7 @@ skip_slb_search:
 
     /* 7. Determine the real address from the PTE */
 
-    raddr = deposit64(pte.pte1 & HPTE64_R_RPN, 0, apshift, eaddr);
+    raddr = deposit64(pte.pte1 & ppc_hash64_hpte_r_rpn(cpu), 0, apshift, eaddr);
 
     tlb_set_page(cs, eaddr & TARGET_PAGE_MASK, raddr & TARGET_PAGE_MASK,
                  prot, mmu_idx, 1ULL << apshift);
@@ -911,7 +925,7 @@ hwaddr ppc_hash64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong addr)
         return -1;
     }
 
-    return deposit64(pte.pte1 & HPTE64_R_RPN, 0, apshift, addr)
+    return deposit64(pte.pte1 & ppc_hash64_hpte_r_rpn(cpu), 0, apshift, addr)
         & TARGET_PAGE_MASK;
 }
 
