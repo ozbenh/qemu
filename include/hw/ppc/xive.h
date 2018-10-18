@@ -201,6 +201,8 @@ typedef struct XiveRouterClass {
                    XiveNVT *nvt);
     int (*set_nvt)(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
                    XiveNVT *nvt);
+    int (*get_nvt_info)(XiveRouter *xrtr, PowerPCCPU *cpu, uint8_t *nvt_blk,
+                        uint32_t *nvt_idx);
 } XiveRouterClass;
 
 void xive_router_print_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas,

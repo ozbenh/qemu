@@ -43,4 +43,22 @@ bool spapr_xive_irq_disable(sPAPRXive *xive, uint32_t lisn);
 void spapr_xive_pic_print_info(sPAPRXive *xive, Monitor *mon);
 qemu_irq spapr_xive_qirq(sPAPRXive *xive, uint32_t lisn);
 
+/*
+ * sPAPR NVT and END indexing helpers
+ */
+static inline uint32_t spapr_xive_nvt_to_target(sPAPRXive *xive,
+                                                uint8_t nvt_blk,
+                                                uint32_t nvt_idx)
+{
+    return nvt_idx;
+}
+int spapr_xive_target_to_nvt(sPAPRXive *xive, uint32_t target,
+                            uint8_t *out_nvt_blk, uint32_t *out_nvt_idx);
+int spapr_xive_cpu_to_nvt(sPAPRXive *xive, PowerPCCPU *cpu,
+                          uint8_t *out_nvt_blk, uint32_t *out_nvt_idx);
+int spapr_xive_target_to_end(sPAPRXive *xive, uint32_t target, uint8_t prio,
+                             uint8_t *out_end_blk, uint32_t *out_end_idx);
+int spapr_xive_cpu_to_end(sPAPRXive *xive, PowerPCCPU *cpu, uint8_t prio,
+                          uint8_t *out_end_blk, uint32_t *out_end_idx);
+
 #endif /* PPC_SPAPR_XIVE_H */

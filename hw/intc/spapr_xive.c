@@ -185,6 +185,100 @@ static int spapr_xive_set_end(XiveRouter *xrtr,
     return 0;
 }
 
+static int spapr_xive_get_nvt(XiveRouter *xrtr,
+                              uint8_t nvt_blk, uint32_t nvt_idx, XiveNVT *nvt)
+{
+    sPAPRXive *xive = SPAPR_XIVE(xrtr);
+    uint32_t vcpu_id = spapr_xive_nvt_to_target(xive, nvt_blk, nvt_idx);
+    PowerPCCPU *cpu = spapr_find_cpu(vcpu_id);
+
+    if (!cpu) {
+        return -1;
+    }
+
+    /*
+     * sPAPR does not maintain a NVT table. Return that the NVT is
+     * valid if we have found a matching CPU
+     */
+    nvt->w0 = NVT_W0_VALID;
+    return 0;
+}
+
+static int spapr_xive_set_nvt(XiveRouter *xrtr,
+                              uint8_t nvt_blk, uint32_t nvt_idx, XiveNVT *nvt)
+{
+    /* no NVT table */
+    return 0;
+}
+
+static int spapr_xive_get_nvt_info(XiveRouter *xrtr, PowerPCCPU *cpu,
+                                   uint8_t *out_nvt_blk, uint32_t *out_nvt_idx)
+{
+    return spapr_xive_cpu_to_nvt(SPAPR_XIVE(xrtr), cpu, out_nvt_blk,
+                                 out_nvt_idx);
+}
+
+/*
+ * sPAPR NVT indexing uses a simple mapping of the CPU vcpu_id
+ */
+int spapr_xive_cpu_to_nvt(sPAPRXive *xive, PowerPCCPU *cpu,
+                          uint8_t *out_nvt_blk, uint32_t *out_nvt_idx)
+{
+    XiveRouter *xrtr = XIVE_ROUTER(xive);
+
+    if (!cpu) {
+        return -1;
+    }
+
+    if (out_nvt_blk) {
+        /* For testing purpose, we could use 0 for nvt_blk */
+        *out_nvt_blk = xrtr->chip_id;
+    }
+
+    if (out_nvt_blk) {
+        *out_nvt_idx = cpu->vcpu_id;
+    }
+    return 0;
+}
+
+int spapr_xive_target_to_nvt(sPAPRXive *xive, uint32_t target,
+                             uint8_t *out_nvt_blk, uint32_t *out_nvt_idx)
+{
+    return spapr_xive_cpu_to_nvt(xive, spapr_find_cpu(target),
+                                out_nvt_blk, out_nvt_idx);
+}
+
+/*
+ * sPAPR END indexing uses a simple mapping of the CPU vcpu_id, 8
+ * priorities per CPU
+ */
+int spapr_xive_cpu_to_end(sPAPRXive *xive, PowerPCCPU *cpu, uint8_t prio,
+                          uint8_t *out_end_blk, uint32_t *out_end_idx)
+{
+    XiveRouter *xrtr = XIVE_ROUTER(xive);
+
+    if (!cpu) {
+        return -1;
+    }
+
+    if (out_end_blk) {
+        /* For testing purpose, we could use 0 for nvt_blk */
+        *out_end_blk = xrtr->chip_id;
+    }
+
+    if (out_end_idx) {
+        *out_end_idx = (cpu->vcpu_id << 3) + prio;
+    }
+    return 0;
+}
+
+int spapr_xive_target_to_end(sPAPRXive *xive, uint32_t target, uint8_t prio,
+                             uint8_t *out_end_blk, uint32_t *out_end_idx)
+{
+    return spapr_xive_cpu_to_end(xive, spapr_find_cpu(target), prio,
+                                out_end_blk, out_end_idx);
+}
+
 static const VMStateDescription vmstate_spapr_xive_end = {
     .name = TYPE_SPAPR_XIVE "/end",
     .version_id = 1,
@@ -249,6 +343,9 @@ static void spapr_xive_class_init(ObjectClass *klass, void *data)
     xrc->set_eas = spapr_xive_set_eas;
     xrc->get_end  = spapr_xive_get_end;
     xrc->set_end  = spapr_xive_set_end;
+    xrc->get_nvt  = spapr_xive_get_nvt;
+    xrc->set_nvt  = spapr_xive_set_nvt;
+    xrc->get_nvt_info  = spapr_xive_get_nvt_info;
 }
 
 static const TypeInfo spapr_xive_info = {
