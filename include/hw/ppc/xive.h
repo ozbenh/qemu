@@ -283,5 +283,7 @@ typedef struct XiveTCTX {
 extern const MemoryRegionOps xive_tm_ops;
 
 void xive_tctx_pic_print_info(XiveTCTX *tctx, Monitor *mon);
+Object *xive_tctx_create(Object *cpu, const char *type, XiveRouter *xrtr,
+                         Error **errp);
 
 #endif /* PPC_XIVE_H */
