@@ -197,6 +197,10 @@ typedef struct XiveRouterClass {
                    XiveEND *end);
     int (*set_end)(XiveRouter *xrtr, uint8_t end_blk, uint32_t end_idx,
                    XiveEND *end);
+    int (*get_nvt)(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
+                   XiveNVT *nvt);
+    int (*set_nvt)(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
+                   XiveNVT *nvt);
 } XiveRouterClass;
 
 void xive_router_print_eas(XiveRouter *xrtr, uint32_t lisn, XiveEAS *eas,
@@ -207,6 +211,10 @@ int xive_router_get_end(XiveRouter *xrtr, uint8_t end_blk, uint32_t end_idx,
                         XiveEND *end);
 int xive_router_set_end(XiveRouter *xrtr, uint8_t end_blk, uint32_t end_idx,
                         XiveEND *end);
+int xive_router_get_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
+                        XiveNVT *nvt);
+int xive_router_set_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
+                        XiveNVT *nvt);
 
 /*
  * XIVE END ESBs
