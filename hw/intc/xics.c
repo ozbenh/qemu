@@ -72,6 +72,11 @@ void ics_pic_print_info(ICSState *ics, Monitor *mon)
         icsc->synchronize_state(ics);
     }
 
+    if (icsc->print_info) {
+        icsc->print_info(ics, mon);
+        return;
+    }
+
     for (i = 0; i < ics->nr_irqs; i++) {
         ICSIRQState *irq = ics->irqs + i;
 

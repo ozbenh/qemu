@@ -123,6 +123,7 @@ struct ICSStateClass {
     void (*resend)(ICSState *s);
     void (*eoi)(ICSState *s, uint32_t irq);
     void (*synchronize_state)(ICSState *s);
+    void (*print_info)(ICSState *ics, Monitor *mon);
 };
 
 struct ICSState {
