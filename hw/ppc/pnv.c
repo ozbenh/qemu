@@ -764,7 +764,7 @@ static void pnv_chip_power8_instance_init(Object *obj)
     object_property_add_const_link(OBJECT(&chip8->lpc), "psi",
                                    OBJECT(&chip8->psi), &error_abort);
 
-    object_initialize(&chip8->occ, sizeof(chip8->occ), TYPE_PNV_OCC);
+    object_initialize(&chip8->occ, sizeof(chip8->occ), TYPE_PNV_OCC_POWER8);
     object_property_add_child(obj, "occ", OBJECT(&chip8->occ), NULL);
     object_property_add_const_link(OBJECT(&chip8->occ), "psi",
                                    OBJECT(&chip8->psi), &error_abort);
@@ -944,6 +944,11 @@ static void pnv_chip_power9_instance_init(Object *obj)
     object_property_add_child(obj, "lpc", OBJECT(&chip9->lpc), NULL);
     object_property_add_const_link(OBJECT(&chip9->lpc), "psi",
                                    OBJECT(&chip9->psi), &error_abort);
+
+    object_initialize(&chip9->occ, sizeof(chip9->occ), TYPE_PNV_OCC_POWER9);
+    object_property_add_child(obj, "occ", OBJECT(&chip9->occ), NULL);
+    object_property_add_const_link(OBJECT(&chip9->occ), "psi",
+                                   OBJECT(&chip9->psi), &error_abort);
 }
 
 static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
@@ -997,6 +1002,14 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(get_system_memory(), PNV9_LPCM_BASE(chip),
                                 &chip9->lpc.xscom_regs);
+
+    /* Create the simplified OCC model */
+    object_property_set_bool(OBJECT(&chip9->occ), true, "realized", &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+    pnv_xscom_add_subregion(chip, PNV9_XSCOM_OCC_BASE, &chip9->occ.xscom_regs);
 }
 
 static void pnv_chip_power9_class_init(ObjectClass *klass, void *data)
