@@ -55,6 +55,10 @@ typedef struct sPAPRXiveClass {
     XiveRouterClass parent_class;
 
     DeviceRealize   parent_realize;
+
+    void (*synchronize_state)(sPAPRXive *xive);
+    int  (*pre_save)(sPAPRXive *xsrc);
+    int  (*post_load)(sPAPRXive *xsrc, int version_id);
 } sPAPRXiveClass;
 
 bool spapr_xive_irq_enable(sPAPRXive *xive, uint32_t lisn, bool lsi);

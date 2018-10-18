@@ -438,8 +438,13 @@ static const struct {
 
 void xive_tctx_pic_print_info(XiveTCTX *tctx, Monitor *mon)
 {
+    XiveTCTXClass *xtc = XIVE_TCTX_BASE_GET_CLASS(tctx);
     int cpu_index = tctx->cs ? tctx->cs->cpu_index : -1;
     int i;
+
+    if (xtc->synchronize_state) {
+        xtc->synchronize_state(tctx);
+    }
 
     monitor_printf(mon, "CPU[%04x]:   QW   NSR CPPR IPB LSMFB ACK# INC AGE PIPR"
                    "  W2\n", cpu_index);
@@ -572,12 +577,39 @@ static void xive_tctx_base_unrealize(DeviceState *dev, Error **errp)
     qemu_unregister_reset(xive_tctx_base_reset, dev);
 }
 
+static int vmstate_xive_tctx_pre_save(void *opaque)
+{
+    XiveTCTX *tctx = XIVE_TCTX_BASE(opaque);
+    XiveTCTXClass *xtc = XIVE_TCTX_BASE_GET_CLASS(tctx);
+
+    if (xtc->pre_save) {
+        return xtc->pre_save(tctx);
+    }
+
+    return 0;
+}
+
+static int vmstate_xive_tctx_post_load(void *opaque, int version_id)
+{
+    XiveTCTX *tctx = XIVE_TCTX_BASE(opaque);
+    XiveTCTXClass *xtc = XIVE_TCTX_BASE_GET_CLASS(tctx);
+
+    if (xtc->post_load) {
+        xtc->post_load(tctx, version_id);
+    }
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_xive_tctx_base = {
     .name = TYPE_XIVE_TCTX,
     .version_id = 1,
     .minimum_version_id = 1,
+    .pre_save = vmstate_xive_tctx_pre_save,
+    .post_load = vmstate_xive_tctx_post_load,
     .fields = (VMStateField[]) {
         VMSTATE_BUFFER(regs, XiveTCTX),
+        VMSTATE_UINT64_ARRAY(opal, XiveTCTX, 2),
         VMSTATE_END_OF_LIST()
     },
 };
@@ -943,7 +975,12 @@ static void xive_source_set_irq(void *opaque, int srcno, int val)
 
 void xive_source_pic_print_info(XiveSource *xsrc, uint32_t offset, Monitor *mon)
 {
+    XiveSourceClass *xsc = XIVE_SOURCE_BASE_GET_CLASS(xsrc);
     int i;
+
+    if (xsc->synchronize_state) {
+        xsc->synchronize_state(xsrc);
+    }
 
     monitor_printf(mon, "XIVE Source %08x .. %08x\n",
                    offset, offset + xsrc->nr_irqs - 1);
@@ -1007,10 +1044,36 @@ static void xive_source_base_realize(DeviceState *dev,  Error **errp)
 
 }
 
+static int vmstate_xive_source_base_pre_save(void *opaque)
+{
+    XiveSource *xsrc = XIVE_SOURCE_BASE(opaque);
+    XiveSourceClass *xsc = XIVE_SOURCE_BASE_GET_CLASS(xsrc);
+
+    if (xsc->pre_save) {
+        return xsc->pre_save(xsrc);
+    }
+
+    return 0;
+}
+
+static int vmstate_xive_source_base_post_load(void *opaque, int version_id)
+{
+    XiveSource *xsrc = XIVE_SOURCE_BASE(opaque);
+    XiveSourceClass *xsc = XIVE_SOURCE_BASE_GET_CLASS(xsrc);
+
+    if (xsc->post_load) {
+        xsc->post_load(xsrc, version_id);
+    }
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_xive_source_base = {
     .name = TYPE_XIVE_SOURCE,
     .version_id = 1,
     .minimum_version_id = 1,
+    .pre_save = vmstate_xive_source_base_pre_save,
+    .post_load = vmstate_xive_source_base_post_load,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32_EQUAL(nr_irqs, XiveSource, NULL),
         VMSTATE_VBUFFER_UINT32(status, XiveSource, 1, NULL, nr_irqs),

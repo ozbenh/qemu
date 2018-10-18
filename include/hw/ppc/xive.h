@@ -85,6 +85,10 @@ typedef struct XiveSourceClass {
 
     DeviceRealize     parent_realize;
     DeviceReset       parent_reset;
+
+    void (*synchronize_state)(XiveSource *xsrc);
+    int  (*pre_save)(XiveSource *xsrc);
+    int  (*post_load)(XiveSource *xsrc, int version_id);
 } XiveSourceClass;
 
 /*
@@ -297,6 +301,9 @@ typedef struct XiveTCTX {
     uint8_t     regs[TM_RING_COUNT * TM_RING_SIZE];
 
     XiveRouter  *xrtr;
+
+    /* KVM support */
+    uint64_t    opal[2];
 } XiveTCTX;
 
 #define XIVE_TCTX_BASE_CLASS(klass) \
@@ -308,6 +315,10 @@ typedef struct XiveTCTXClass {
     DeviceClass       parent_class;
 
     DeviceRealize     parent_realize;
+
+    void (*synchronize_state)(XiveTCTX *tctx);
+    int  (*pre_save)(XiveTCTX *tctx);
+    int  (*post_load)(XiveTCTX *tctx, int version_id);
 } XiveTCTXClass;
 
 /*
