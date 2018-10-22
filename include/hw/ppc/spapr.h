@@ -822,4 +822,5 @@ int spapr_caps_post_migration(sPAPRMachineState *spapr);
 void spapr_check_pagesize(sPAPRMachineState *spapr, hwaddr pagesize,
                           Error **errp);
 
+void spapr_set_all_lpcrs(target_ulong value, target_ulong mask);
 #endif /* HW_SPAPR_H */
