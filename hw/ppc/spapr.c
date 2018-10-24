@@ -1404,11 +1404,13 @@ void spapr_set_all_lpcrs(target_ulong value, target_ulong mask)
     }
 }
 
-static uint64_t spapr_get_patbe(PPCVirtualHypervisor *vhyp)
+static void spapr_get_pate(PPCVirtualHypervisor *vhyp, ppc_v3_pate_t *entry)
 {
     sPAPRMachineState *spapr = SPAPR_MACHINE(vhyp);
 
-    return spapr->patb_entry;
+    /* Copy PATE1:GR into PATE0:HR */
+    entry->dw0 = spapr->patb_entry & PATE0_HR;
+    entry->dw1 = spapr->patb_entry;
 }
 
 #define HPTE(_table, _i)   (void *)(((uint64_t *)(_table)) + ((_i) * 2))
@@ -1647,8 +1649,8 @@ static void spapr_machine_reset(void)
                               spapr->max_compat_pvr)) {
         /* If using KVM with radix mode available, VCPUs can be started
          * without a HPT because KVM will start them in radix mode.
-         * Set the GR bit in PATB so that we know there is no HPT. */
-        spapr->patb_entry = PATBE1_GR;
+         * Set the GR bit in PATE so that we know there is no HPT. */
+        spapr->patb_entry = PATE1_GR;
         spapr_set_all_lpcrs(LPCR_HR | LPCR_UPRT, LPCR_HR | LPCR_UPRT);
     } else {
         spapr_setup_hpt_and_vrma(spapr);
@@ -1793,7 +1795,7 @@ static int spapr_post_load(void *opaque, int version_id)
 
     if (kvm_enabled() && spapr->patb_entry) {
         PowerPCCPU *cpu = POWERPC_CPU(first_cpu);
-        bool radix = !!(spapr->patb_entry & PATBE1_GR);
+        bool radix = !!(spapr->patb_entry & PATE1_GR);
         bool gtse = !!(cpu->env.spr[SPR_LPCR] & LPCR_GTSE);
 
         /* Update LPCR:HR and UPRT as they may not be set properly in
@@ -3944,7 +3946,7 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     vhc->map_hptes = spapr_map_hptes;
     vhc->unmap_hptes = spapr_unmap_hptes;
     vhc->store_hpte = spapr_store_hpte;
-    vhc->get_patbe = spapr_get_patbe;
+    vhc->get_pate = spapr_get_pate;
     vhc->encode_hpt_for_kvm_pr = spapr_encode_hpt_for_kvm_pr;
     xic->ics_get = spapr_ics_get;
     xic->ics_resend = spapr_ics_resend;
