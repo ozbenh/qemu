@@ -1508,8 +1508,19 @@ static void spapr_store_hpte(PPCVirtualHypervisor *vhyp, hwaddr ptex,
     if (!spapr->htab) {
         kvmppc_write_hpte(ptex, pte0, pte1);
     } else {
-        stq_p(spapr->htab + offset, pte0);
-        stq_p(spapr->htab + offset + HASH_PTE_SIZE_64 / 2, pte1);
+        /* When setting valid, we write PTE1 first. When clearing it
+         * we set PTE0 first. This ensures proper synchronization
+         * with the reading code in ppc_hash64_pteg_search()
+         */
+        if (pte0 & HPTE64_V_VALID) {
+            stq_p(spapr->htab + offset + HASH_PTE_SIZE_64 / 2, pte1);
+            smp_wmb();
+            stq_p(spapr->htab + offset, pte0);
+        } else {
+            stq_p(spapr->htab + offset, pte0);
+            smp_wmb();
+            stq_p(spapr->htab + offset + HASH_PTE_SIZE_64 / 2, pte1);
+        }
     }
 }
 
