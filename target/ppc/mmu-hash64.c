@@ -290,30 +290,6 @@ target_ulong helper_load_slb_vsid(CPUPPCState *env, target_ulong rb)
     return rt;
 }
 
-hwaddr ppc_hash64_hpt_reg(PowerPCCPU *cpu)
-{
-    CPUPPCState *env = &cpu->env;
-
-    /* We should not reach this routine on sPAPR machines */
-    assert(!cpu->vhyp);
-
-    if (env->mmu_model < POWERPC_MMU_2_07) {
-        return cpu->env.spr[SPR_SDR1];
-    }
-
-    /* P8/P9 PowerNV machine */
-    if (msr_hv) {
-        if (env->mmu_model == POWERPC_MMU_3_00) {
-            return ppc64_v3_get_patbe0(cpu);
-        } else {
-            return cpu->env.spr[SPR_SDR1];
-        }
-    } else {
-        error_report("PowerNV guest support Unimplemented");
-        exit(1);
-    }
-}
-
 /* Check No-Execute or Guarded Storage */
 static inline int ppc_hash64_pte_noexec_guard(PowerPCCPU *cpu,
                                               ppc_hash_pte64_t pte)

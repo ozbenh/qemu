@@ -132,14 +132,12 @@ static inline target_ulong ppc_hash64_hpte_v_avpn_val(PowerPCCPU *cpu,
         HPTE64_V_AVPN_VAL_3_0(pte0) : HPTE64_V_AVPN_VAL(pte0);
 }
 
-hwaddr ppc_hash64_hpt_reg(PowerPCCPU *cpu);
-
 static inline hwaddr ppc_hash64_hpt_base(PowerPCCPU *cpu)
 {
     if (cpu->vhyp) {
         return 0;
     }
-    return ppc_hash64_hpt_reg(cpu) & SDR_64_HTABORG;
+    return cpu->env.spr[SPR_SDR1] & SDR_64_HTABORG;
 }
 
 static inline hwaddr ppc_hash64_hpt_mask(PowerPCCPU *cpu)
@@ -149,7 +147,7 @@ static inline hwaddr ppc_hash64_hpt_mask(PowerPCCPU *cpu)
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         return vhc->hpt_mask(cpu->vhyp);
     }
-    return (1ULL << ((ppc_hash64_hpt_reg(cpu) & SDR_64_HTABSIZE) + 18 - 7)) - 1;
+    return (1ULL << ((cpu->env.spr[SPR_SDR1] & SDR_64_HTABSIZE) + 18 - 7)) - 1;
 }
 
 struct ppc_hash_pte64 {
