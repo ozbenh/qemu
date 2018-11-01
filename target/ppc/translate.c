@@ -1613,7 +1613,7 @@ static void gen_pause(DisasContext *ctx)
     tcg_temp_free_i32(t0);
 
     /* Stop translation, this gives other CPUs a chance to run */
-    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
+    gen_exception_nip(ctx, EXCP_INTERRUPT, ctx->base.pc_next);
 }
 #endif /* defined(TARGET_PPC64) */
 
@@ -1695,7 +1695,9 @@ static void gen_or(DisasContext *ctx)
          * than no-op, e.g., miso(rs=26), yield(27), mdoio(29), mdoom(30),
          * and all currently undefined.
          */
-        gen_pause(ctx);
+        if (!mttcg_enabled) {
+            gen_pause(ctx);
+        }
 #endif
 #endif
     }
