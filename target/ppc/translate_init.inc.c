@@ -3318,6 +3318,15 @@ static void init_excp_POWER8(CPUPPCState *env)
 #endif
 }
 
+static void init_excp_POWER9(CPUPPCState *env)
+{
+    init_excp_POWER8(env);
+
+#if !defined(CONFIG_USER_ONLY)
+    env->excp_vectors[POWERPC_EXCP_HVIRT]    = 0x00000EA0;
+#endif
+}
+
 #endif
 
 /*****************************************************************************/
@@ -8796,7 +8805,7 @@ static void init_proc_POWER9(CPUPPCState *env)
     env->icache_line_size = 128;
 
     /* Allocate hardware IRQ controller */
-    init_excp_POWER8(env);
+    init_excp_POWER9(env);
     ppcPOWER7_irq_init(ppc_env_get_cpu(env));
 }
 
@@ -8847,6 +8856,11 @@ static bool cpu_has_work_POWER9(CPUState *cs)
         /* Hypervisor Doorbell Exception */
         if ((env->pending_interrupts & (1u << PPC_INTERRUPT_HDOORBELL)) &&
             (env->spr[SPR_LPCR] & LPCR_HDEE)) {
+            return true;
+        }
+        /* Hypervisor virtualization exception */
+        if ((env->pending_interrupts & (1u << PPC_INTERRUPT_HVIRT)) &&
+            (env->spr[SPR_LPCR] & LPCR_HVEE)) {
             return true;
         }
         if (env->pending_interrupts & (1u << PPC_INTERRUPT_RESET)) {
