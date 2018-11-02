@@ -297,7 +297,8 @@ typedef struct XiveTCTX {
     DeviceState parent_obj;
 
     CPUState    *cs;
-    qemu_irq    output;
+    qemu_irq    hv_output;
+    qemu_irq    os_output;
 
     uint8_t     regs[TM_RING_COUNT * TM_RING_SIZE];
 
