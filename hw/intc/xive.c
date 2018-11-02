@@ -614,7 +614,7 @@ static void xive_tctx_base_realize(DeviceState *dev, Error **errp)
 
     env = &cpu->env;
     switch (PPC_INPUT(env)) {
-    case PPC_FLAGS_INPUT_POWER7:
+    case PPC_FLAGS_INPUT_POWER9:
         tctx->output = env->irq_inputs[POWER7_INPUT_INT];
         break;
 

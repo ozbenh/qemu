@@ -2339,6 +2339,13 @@ enum {
      * them */
     POWER7_INPUT_NB,
 };
+
+enum {
+    /* POWER9 input pins */
+    POWER9_INPUT_INT        = 0, /* Must match POWER7_INPUT_INT */
+    POWER9_INPUT_HINT       = 1,
+    POWER9_INPUT_NB,
+};
 #endif
 
 /* Hardware exceptions definitions */
