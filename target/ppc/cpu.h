@@ -427,6 +427,10 @@ typedef struct ppc_v3_pate_t {
 #define LPCR_HVICE        PPC_BIT(62) /* HV Virtualisation Int Enable */
 #define LPCR_HDICE        PPC_BIT(63)
 
+/* PSSCR bits */
+#define PSSCR_ESL         PPC_BIT(42) /* Enable State Loss */
+#define PSSCR_EC          PPC_BIT(43) /* Exit Criterion */
+
 #define msr_sf   ((env->msr >> MSR_SF)   & 1)
 #define msr_isf  ((env->msr >> MSR_ISF)  & 1)
 #define msr_shv  ((env->msr >> MSR_SHV)  & 1)
@@ -1126,7 +1130,8 @@ struct CPUPPCState {
      * instructions and SPRs are diallowed if MSR:HV is 0
      */
     bool has_hv_mode;
-    /* On P7/P8, set when in PM state, we need to handle resume
+
+    /* On P7/P8/P9, set when in PM state, we need to handle resume
      * in a special way (such as routing some resume causes to
      * 0x100), so flag this here.
      */
