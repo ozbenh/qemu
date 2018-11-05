@@ -26,6 +26,7 @@
 #include "hw/ppc/pnv_psi.h"
 #include "hw/ppc/pnv_occ.h"
 #include "hw/pci-host/pnv_phb3.h"
+#include "hw/pci-host/pnv_phb4.h"
 #include "hw/ppc/pnv_xive.h"
 
 #define TYPE_PNV_CHIP "pnv-chip"
@@ -96,6 +97,9 @@ typedef struct Pnv9Chip {
 
     uint32_t     nr_quads;
     PnvQuad      *quads;
+
+#define PNV9_CHIP_MAX_PEC 3
+    PnvPhb4PecState pecs[PNV9_CHIP_MAX_PEC];
 } Pnv9Chip;
 
 typedef struct PnvChipClass {
