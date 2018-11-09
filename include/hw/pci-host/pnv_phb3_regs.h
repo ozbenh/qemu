@@ -105,6 +105,8 @@
 #define PHB_M64_UPPER_BITS              0x1f0
 #define PHB_INTREP_TIMER                0x1f8
 #define PHB_DMARD_SYNC                  0x200
+#define   PHB_DMARD_SYNC_START		PPC_BIT(0)
+#define   PHB_DMARD_SYNC_COMPLETE	PPC_BIT(1)
 #define PHB_RTC_INVALIDATE              0x208
 #define   PHB_RTC_INVALIDATE_ALL        PPC_BIT(0)
 #define   PHB_RTC_INVALIDATE_RID        PPC_BITMASK(16, 31)
@@ -249,7 +251,12 @@
 #define PHB_TCE_WATERMARK               0x870
 #define PHB_TIMEOUT_CTRL1               0x878
 #define PHB_TIMEOUT_CTRL2               0x880
-#define PHB_QUIESCE_DMA_G               0x888
+#define PHB_Q_DMA_R			0x888
+#define   PHB_Q_DMA_R_QUIESCE_DMA	PPC_BIT(0)
+#define   PHB_Q_DMA_R_AUTORESET		PPC_BIT(1)
+#define   PHB_Q_DMA_R_DMA_RESP_STATUS	PPC_BIT(4)
+#define   PHB_Q_DMA_R_MMIO_RESP_STATUS	PPC_BIT(5)
+#define   PHB_Q_DMA_R_TCE_RESP_STATUS	PPC_BIT(6)
 #define PHB_AIB_TAG_STATUS              0x900
 #define PHB_TCE_TAG_STATUS              0x908
 

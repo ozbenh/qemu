@@ -288,12 +288,12 @@ static uint64_t *pnv_phb3_ioda_access(PnvPHB3 *phb,
     if (out_table) {
         *out_table = table;
     }
+    if (tptr) {
+        tptr += index;
+    }
     if (adreg & PHB_IODA_AD_AUTOINC) {
         index = (index + 1) & mask;
         adreg = SETFIELD(PHB_IODA_AD_TADR, adreg, index);
-    }
-    if (tptr) {
-        tptr += index;
     }
     phb->regs[PHB_IODA_ADDR >> 3] = adreg;
     return tptr;
@@ -479,10 +479,36 @@ void pnv_phb3_reg_write(void *opaque, hwaddr off, uint64_t val, unsigned size)
         return;
     }
 
-    /* Handle masking */
+    /* Handle masking & filtering */
     switch (off) {
     case PHB_M64_UPPER_BITS:
         val &= 0xfffc000000000000ull;
+        break;
+    case PHB_Q_DMA_R:
+        /* This is enough logic to make SW happy but we aren't actually
+         * quiescing the DMAs
+         */
+        if (val & PHB_Q_DMA_R_AUTORESET) {
+            val = 0;
+        } else {
+            val &= PHB_Q_DMA_R_QUIESCE_DMA;
+        }
+        break;
+    /* LEM stuff */
+    case PHB_LEM_FIR_AND_MASK:
+        phb->regs[PHB_LEM_FIR_ACCUM >> 3] &= val;
+        return;
+    case PHB_LEM_FIR_OR_MASK:
+        phb->regs[PHB_LEM_FIR_ACCUM >> 3] |= val;
+        return;
+    case PHB_LEM_ERROR_AND_MASK:
+        phb->regs[PHB_LEM_ERROR_MASK >> 3] &= val;
+        return;
+    case PHB_LEM_ERROR_OR_MASK:
+        phb->regs[PHB_LEM_ERROR_MASK >> 3] |= val;
+        return;
+    case PHB_LEM_WOF:
+        val = 0;
         break;
     }
 
@@ -543,6 +569,10 @@ void pnv_phb3_reg_write(void *opaque, hwaddr off, uint64_t val, unsigned size)
     case PHB_RBA_BAR:
     case PHB_IVT_BAR:
     case PHB_FFI_LOCK:
+    case PHB_LEM_FIR_ACCUM:
+    case PHB_LEM_ERROR_MASK:
+    case PHB_LEM_ACTION0:
+    case PHB_LEM_ACTION1:
         break;
 
     /* Noise on anything else */
@@ -592,6 +622,10 @@ uint64_t pnv_phb3_reg_read(void *opaque, hwaddr off, unsigned size)
         phb->regs[off >> 3] |= PHB_FFI_LOCK_STATE;
         return val;
 
+    /* DMA read sync: make it look like it's complete */
+    case PHB_DMARD_SYNC:
+        return PHB_DMARD_SYNC_COMPLETE;
+
     /* Silent simple reads */
     case PHB_PHB3_CONFIG:
     case PHB_M32_BASE_ADDR:
@@ -608,6 +642,10 @@ uint64_t pnv_phb3_reg_read(void *opaque, hwaddr off, unsigned size)
     case PHB_RBA_BAR:
     case PHB_IVT_BAR:
     case PHB_M64_UPPER_BITS:
+    case PHB_LEM_FIR_ACCUM:
+    case PHB_LEM_ERROR_MASK:
+    case PHB_LEM_ACTION0:
+    case PHB_LEM_ACTION1:
         break;
 
     /* Noise on anything else */
@@ -658,7 +696,7 @@ static bool pnv_phb3_resolve_pe(PnvPhb3DMASpace *ds)
 
     /* We need to lookup the RTT */
     rtt = ds->phb->regs[PHB_RTT_BAR >> 3];
-    if (!(rtt & PHB_RBA_BAR_ENABLE)) {
+    if (!(rtt & PHB_RTT_BAR_ENABLE)) {
         phb3_error("DMA with RTT BAR disabled !");
         /* Set error bits ? fence ? ... */
         return false;
@@ -1070,6 +1108,7 @@ void pnv_phb3_update_regions(PnvPHB3 *phb)
     if (phb->m32_mapped) {
         pnv_phb3_check_m32(phb);
     }
+    pnv_phb3_check_all_m64s(phb);
 }
 
 static const char *pnv_phb3_root_bus_path(PCIHostState *host_bridge,
