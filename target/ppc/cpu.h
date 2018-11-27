@@ -1138,6 +1138,9 @@ struct CPUPPCState {
      * 0x100, ie, sreset), so flag this here.
      */
     bool resume_as_sreset;
+
+    /* Used by SPAPR for H_CEDE/H_PROD */
+    bool prodded;
 #endif
 
     /* Those resources are used only during code translation */
