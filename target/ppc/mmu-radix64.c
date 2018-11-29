@@ -27,6 +27,15 @@
 #include "exec/log.h"
 #include "mmu-book3s-v3.h"
 
+static inline bool ppc_radix64_hw_rc_updates(CPUPPCState *env)
+{
+#ifdef CONFIG_ATOMIC64
+    return true;
+#else
+    return !qemu_tcg_mttcg_enabled();
+#endif
+}
+
 static bool ppc_radix64_get_fully_qualified_addr(CPUPPCState *env, vaddr eaddr,
                                                  uint64_t *lpid, uint64_t *pid)
 {
@@ -135,11 +144,18 @@ static bool ppc_radix64_check_prot(PowerPCCPU *cpu, int rwx, uint64_t pte,
         return true;
     }
 
+    /* Check RC bits if necessary */
+    if (!ppc_radix64_hw_rc_updates(env)) {
+        if (!(pte & R_PTE_R) || ((rwx == 1) && !(pte & R_PTE_C))) {
+            *fault_cause |= DSISR_ATOMIC_RC;
+            return true;
+        }
+    }
+
     return false;
 }
 
-static void ppc_radix64_set_rc(PowerPCCPU *cpu, int rwx, uint64_t pte,
-                               hwaddr pte_addr, int *prot)
+static uint64_t ppc_radix64_set_rc(PowerPCCPU *cpu, int rwx, uint64_t pte, hwaddr pte_addr)
 {
     CPUState *cs = CPU(cpu);
     uint64_t npte;
@@ -148,17 +164,38 @@ static void ppc_radix64_set_rc(PowerPCCPU *cpu, int rwx, uint64_t pte,
 
     if (rwx == 1) { /* Store/Write */
         npte |= R_PTE_C; /* Set change bit */
-    } else {
-        /*
-         * Treat the page as read-only for now, so that a later write
-         * will pass through this function again to set the C bit.
-         */
-        *prot &= ~PAGE_WRITE;
+    }
+    if (pte == npte) {
+        return pte;
     }
 
-    if (pte ^ npte) { /* If pte has changed then write it back */
-        stq_phys(cs->as, pte_addr, npte);
+#ifdef CONFIG_ATOMIC64
+    if (qemu_tcg_mttcg_enabled()) {
+        uint64_t old_be = cpu_to_be32(pte);
+        uint64_t new_be = cpu_to_be32(npte);
+        MemTxResult result;
+        uint64_t old_ret;
+
+        old_ret = address_space_cmpxchgq_notdirty(cs->as, pte_addr,
+                                                  old_be, new_be,
+                                                  MEMTXATTRS_UNSPECIFIED,
+                                                  &result);
+        if (result == MEMTX_OK) {
+            if (old_ret != old_be && old_ret != new_be) {
+                return 0;
+            }
+            return npte;
+        }
+
+        /* Do we need to support this case where PTEs aren't in RAM ?
+         *
+         * For now fallback to non-atomic case
+         */
     }
+#endif
+
+    stq_phys(cs->as, pte_addr, npte);
+    return npte;
 }
 
 static uint64_t ppc_radix64_walk_tree(PowerPCCPU *cpu, vaddr eaddr,
@@ -285,6 +322,7 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
 
     /* Walk Radix Tree from Process Table Entry to Convert EA to RA */
     page_size = PRTBE_R_GET_RTS(prtbe0);
+ restart:
     pte = ppc_radix64_walk_tree(cpu, eaddr & R_EADDR_MASK,
                                 prtbe0 & PRTBE_R_RPDB, prtbe0 & PRTBE_R_RPDS,
                                 &raddr, &page_size, &fault_cause, &pte_addr);
@@ -295,8 +333,16 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
     }
 
     /* Update Reference and Change Bits */
-    ppc_radix64_set_rc(cpu, rwx, pte, pte_addr, &prot);
-
+    if (ppc_radix64_hw_rc_updates(env)) {
+        pte = ppc_radix64_set_rc(cpu, rwx, pte, pte_addr);
+        if (!pte) {
+            goto restart;
+        }
+    }
+    /* If the page doesn't have C, treat it as read only */
+    if (!(pte & R_PTE_C)) {
+        prot &= ~PAGE_WRITE;
+    }
     tlb_set_page(cs, eaddr & TARGET_PAGE_MASK, raddr & TARGET_PAGE_MASK,
                  prot, mmu_idx, 1UL << page_size);
     return 0;
