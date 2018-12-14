@@ -68,6 +68,9 @@ static void spapr_cpu_reset(void *opaque)
 
     ppc_store_lpcr(cpu, lpcr);
 
+    /* Set PSSCR:EC so that we don't wake up spuriously on POWER9 */
+    env->spr[SPR_PSSCR] = PSSCR_EC;
+
     /* Set a full AMOR so guest can use the AMR as it sees fit */
     env->spr[SPR_AMOR] = 0xffffffffffffffffull;
 
