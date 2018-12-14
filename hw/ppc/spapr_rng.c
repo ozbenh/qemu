@@ -94,6 +94,33 @@ static target_ulong h_random(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     return H_SUCCESS;
 }
 
+static uint64_t spapr_rng_read_darn(CPUPPCState *env)
+{
+    sPAPRRngState *rngstate;
+    HRandomData hrdata;
+
+    rngstate = SPAPR_RNG(object_resolve_path_type("", TYPE_SPAPR_RNG, NULL));
+
+    if (!rngstate || !rngstate->backend) {
+        return -1ull;
+    }
+
+    qemu_sem_init(&hrdata.sem, 0);
+    hrdata.val.v64 = 0;
+    hrdata.received = 0;
+
+    while (hrdata.received < 8) {
+        rng_backend_request_entropy(rngstate->backend, 8 - hrdata.received,
+                                    random_recv, &hrdata);
+        qemu_mutex_unlock_iothread();
+        qemu_sem_wait(&hrdata.sem);
+        qemu_mutex_lock_iothread();
+    }
+
+    qemu_sem_destroy(&hrdata.sem);
+    return hrdata.val.v64;
+}
+
 static void spapr_rng_instance_init(Object *obj)
 {
     if (object_resolve_path_type("", TYPE_SPAPR_RNG, NULL) != NULL) {
@@ -126,7 +153,16 @@ static void spapr_rng_realize(DeviceState *dev, Error **errp)
     }
 
     if (rngstate->backend) {
+        CPUState *cs;
+
         spapr_register_hypercall(H_RANDOM, h_random);
+
+        CPU_FOREACH(cs) {
+            PowerPCCPU *cpu = POWERPC_CPU(cs);
+            CPUPPCState *env = &cpu->env;
+
+            env->read_darn = spapr_rng_read_darn;
+        }
     } else {
         error_setg(errp, "spapr-rng needs an RNG backend!");
     }
