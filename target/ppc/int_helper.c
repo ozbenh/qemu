@@ -156,24 +156,28 @@ uint32_t helper_cmpeqb(target_ulong ra, target_ulong rb)
 #undef haszero
 #undef hasvalue
 
-/* Return invalid random number.
- *
- * FIXME: Add rng backend or other mechanism to get cryptographically suitable
- * random number
- */
-target_ulong helper_darn32(void)
+/* Return invalid random number */
+target_ulong helper_darn32(CPUPPCState *env)
 {
-    return -1;
+    target_ulong r;
+
+    if (!env->read_darn) {
+        return -1ull;
+    }
+    r = env->read_darn(env);
+    if (r != (target_ulong)-1ull) {
+        return r & 0xffffffff;
+    }
+    return r;
 }
 
-target_ulong helper_darn64(void)
+target_ulong helper_darn64(CPUPPCState *env)
 {
-    return -1;
+    if (!env->read_darn) {
+        return -1ull;
+    }
+    return env->read_darn(env);
 }
-
-#endif
-
-#if defined(TARGET_PPC64)
 
 uint64_t helper_bpermd(uint64_t rs, uint64_t rb)
 {

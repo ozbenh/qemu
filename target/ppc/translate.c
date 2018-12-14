@@ -1855,10 +1855,10 @@ static void gen_darn(DisasContext *ctx)
     int l = L(ctx->opcode);
 
     if (l == 0) {
-        gen_helper_darn32(cpu_gpr[rD(ctx->opcode)]);
+        gen_helper_darn32(cpu_gpr[rD(ctx->opcode)], cpu_env);
     } else if (l <= 2) {
         /* Return 64-bit random for both CRN and RRN */
-        gen_helper_darn64(cpu_gpr[rD(ctx->opcode)]);
+        gen_helper_darn64(cpu_gpr[rD(ctx->opcode)], cpu_env);
     } else {
         tcg_gen_movi_i64(cpu_gpr[rD(ctx->opcode)], -1);
     }
